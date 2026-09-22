@@ -5,7 +5,20 @@
  *   the presets in cabin-presets.js cover every other supported layout (2-2 up to 3-4-3).
  * - Passenger numbers are distribution parameters; js/engine/passengers.js draws from them per seed.
  * - Anything marked "assumption" has no published value; the calibration tests in
- *   tests/unit/calibration.test.js keep the totals inside the measured ranges.
+ *   tests/unit/calibration-deplane.test.js keep the totals inside the measured ranges.
+ *
+ * Assumption parameters tuned for deplaning calibration (all others left at their sourced value):
+ *   walkSpeedLogSigma      0.15 -> 0.55 (wider lognormal jitter models the slow-walker tail;
+ *                                        pushes the last-off passenger's exit time into the
+ *                                        Milne & Salari 8-10 min band without slowing the mean).
+ *   prepMedianSeconds      2    -> 1    (Milne & Salari cite 1-2 s; keeps early throughput up).
+ *   prepLogSigma           0.8  -> 0.5  (paired with the shorter median so the ramp stays fast).
+ *   seatEgressSecondsPerPosition
+ *                          2    -> 0.5  (aisle 0.5 s, middle 1.0 s, window 1.5 s; ensures front
+ *                                        rows do not serialise long enough to starve door flow.
+ *                                        See the note on the row-cell serialisation offset in
+ *                                        tests/unit/calibration-deplane.test.js.)
+ *   doorServiceSeconds     1.0  -> 0.9  (marginal; keeps the door from becoming the ceiling).
  */
 
 export const CABIN_DEFAULTS = Object.freeze({
@@ -21,7 +34,7 @@ export const CABIN_DEFAULTS = Object.freeze({
   binCapacityPerSeatRow: 1.0,    // Space Bin era: round(1.0 * blockWidth * binRowsPerBin) bags per bin
                                  //   -> a 3-wide block over 2 rows holds 6 (Airspace XL / Space Bin figure).
                                  //   Legacy retrofits use 0.67 (holds 4 in the same 3-wide bin), regional 0.5.
-  doorServiceSeconds: 1.0,       // seconds per passenger crossing the door server; a widebody's aisles share
+  doorServiceSeconds: 0.9,       // seconds per passenger crossing the door server; a widebody's aisles share
                                  //   one front-door server, matching how the aft cabin merges in the galley.
   loadFactor: 0.85,              // Schultz baseline
 });
@@ -32,11 +45,11 @@ export const PASSENGER_DEFAULTS = Object.freeze({
 
   // Walking. 0.8 m/s free speed (Schultz 2018), per-passenger lognormal jitter is our assumption.
   walkSpeedMetersPerSecond: 0.8,
-  walkSpeedLogSigma: 0.15,
+  walkSpeedLogSigma: 0.55,
 
   // Seatbelt-sign-off to ready-to-stand. Milne & Salari use 1-2 s; the distracted tail is our assumption.
-  prepMedianSeconds: 2,
-  prepLogSigma: 0.8,
+  prepMedianSeconds: 1,
+  prepLogSigma: 0.5,
   distractedFraction: 0.10,
   distractedExtraSecondsRange: [10, 30],
 
@@ -52,7 +65,7 @@ export const PASSENGER_DEFAULTS = Object.freeze({
   secondBagStowExtraSeconds: 8,
 
   // Getting out of the seat while deplaning: per seat position crossed (aisle 1, middle 2, window 3). Assumption.
-  seatEgressSecondsPerPosition: 2,
+  seatEgressSecondsPerPosition: 0.5,
 
   // Seat interference while boarding: 5 s per movement, movement counts per blocking case (Schultz 2018).
   seatInterferenceSecondsPerMovement: 5,
