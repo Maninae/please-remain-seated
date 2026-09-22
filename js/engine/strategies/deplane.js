@@ -75,7 +75,7 @@ function rowByRowScratch(state) {
 const ROW_BY_ROW = {
   id: 'row-by-row',
   label: 'Row-by-row',
-  blurb: 'Row 1 leaves, then row 2, then row 3. Everybody waits their turn.',
+  blurb: 'Row 1 stands and leaves. Row 2 does not stand until every row-1 passenger is out of the seat, then row 3 waits on row 2, and so on. The strictest possible waiting order.',
   canLeaveSeat(passenger, state) {
     const data = scratchFor(state, 'row-by-row', () => rowByRowScratch(state));
     return passenger.row <= data.clearedThroughByAisle[passenger.aisleIndex] + 1;
@@ -234,7 +234,7 @@ function backToFrontScratch(state) {
 const BACK_TO_FRONT = {
   id: 'back-to-front',
   label: 'Back-to-front',
-  blurb: 'Row 30 leaves, then row 29, and so on. Walkers only stop at the back.',
+  blurb: 'The aftmost row stands and leaves. The row ahead of it does not stand until every one of its rear neighbours is out of the seat, and so on toward row 1. The strict mirror of row-by-row.',
   canLeaveSeat(passenger, state) {
     const data = scratchFor(state, 'back-to-front', () => backToFrontScratch(state));
     return passenger.row >= data.clearedFromBack[passenger.aisleIndex] - 1;

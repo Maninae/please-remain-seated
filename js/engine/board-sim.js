@@ -34,6 +34,7 @@ import { EMPTY_CELL, BoardPhase, Vis, SimMode, TimeBucket, createEmptyTimeSplit 
 import { rowToCell } from './cabin.js';
 import { createBins, placeBag, binAccessRow } from './bins.js';
 import { accountStep, createMetrics, sampleMetrics, summarizeMetrics } from './metrics.js';
+import { claimCell, releaseCell, moveCell, isCellEmpty } from './aisle.js';
 import { BOARD_STRATEGY_BY_ID } from './strategies/board.js';
 import { applyStrategyOrder, interferenceKind, findBlockingRowmates } from './board-rules.js';
 
@@ -98,9 +99,8 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
       return;
     }
     if (state.t - lastEntryTime < passenger.doorGapSeconds) return;
-    const lane = aisles[passenger.aisleIndex];
-    if (lane[0] !== EMPTY_CELL) return;
-    lane[0] = passenger.id;
+    if (!isCellEmpty(state, passenger.aisleIndex, 0)) return;
+    claimCell(state, passenger.aisleIndex, 0, passenger.id);
     passenger.aisleCell = 0;
     passenger.phase = BoardPhase.WALKING;
     passenger.vis = Vis.MOVING;
@@ -172,13 +172,12 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
       accountStep(passenger, TimeBucket.WALKING, dtSeconds);
       return;
     }
-    if (nextCell < 0 || nextCell >= lane.length || lane[nextCell] !== EMPTY_CELL) {
+    if (nextCell < 0 || nextCell >= lane.length || !isCellEmpty(state, passenger.aisleIndex, nextCell)) {
       passenger.vis = Vis.BLOCKED;
       accountStep(passenger, TimeBucket.AISLE_BLOCKED, dtSeconds);
       return;
     }
-    lane[passenger.aisleCell] = EMPTY_CELL;
-    lane[nextCell] = passenger.id;
+    moveCell(state, passenger.aisleIndex, passenger.aisleCell, nextCell, passenger.id);
     passenger.aisleCell = nextCell;
     passenger.walkTimerBoard = 0;
     passenger.vis = Vis.MOVING;
@@ -250,12 +249,11 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
     // cell is empty. Already-DISPLACED row-mates do not get moved again; the extra interference
     // time still passes.
     if (kind !== 'none') {
-      const lane = aisles[passenger.aisleIndex];
       const behind = passenger.aisleCell - 1;
       const physicallySeated = blocking.filter((rowmate) => rowmate.phase === BoardPhase.SEATED);
-      if (behind >= 0 && lane[behind] === EMPTY_CELL && physicallySeated.length > 0) {
+      if (behind >= 0 && isCellEmpty(state, passenger.aisleIndex, behind) && physicallySeated.length > 0) {
         const target = physicallySeated[0];
-        lane[behind] = target.id;
+        claimCell(state, passenger.aisleIndex, behind, target.id);
         target.aisleCell = behind;
         target.phase = BoardPhase.DISPLACED;
         target.vis = Vis.BAG;
@@ -265,8 +263,7 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
   }
 
   function finishSeatInterference(passenger) {
-    const lane = aisles[passenger.aisleIndex];
-    lane[passenger.aisleCell] = EMPTY_CELL;
+    releaseCell(state, passenger.aisleIndex, passenger.aisleCell, passenger.id);
     passenger.aisleCell = null;
     passenger.phase = BoardPhase.SEATED;
     passenger.vis = Vis.SEATED;
@@ -275,8 +272,7 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
     for (const other of passengers) {
       if (other.phase !== BoardPhase.DISPLACED) continue;
       if (other.displacedByBoard !== passenger.id) continue;
-      const otherLane = aisles[other.aisleIndex];
-      if (other.aisleCell !== null) otherLane[other.aisleCell] = EMPTY_CELL;
+      if (other.aisleCell !== null) releaseCell(state, other.aisleIndex, other.aisleCell, other.id);
       other.aisleCell = null;
       other.phase = BoardPhase.SEATED;
       other.vis = Vis.SEATED;

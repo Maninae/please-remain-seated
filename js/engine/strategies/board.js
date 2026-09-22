@@ -3,19 +3,21 @@
  *
  * Each strategy is `{ id, label, blurb, order(passengers, rng, cabin) -> Passenger[] }`. The
  * returned array is the door queue (front of the queue enters first). `order` is pure for eight
- * of the nine; `open-seating` mutates each passenger's `row`, `col`, and the geometry fields to
- * reflect the seat they picked themselves, then returns them in the order they picked.
+ * of the nine; `open-seating` (see strategies/open-seating.js) mutates each passenger's `row`,
+ * `col`, and the geometry fields to reflect the seat they picked themselves, then returns them
+ * in the order they picked.
  *
  * A "window" seat is the deepest depth on its side of the block, an "aisle" seat has depth 0, and
  * everything in between is "middle" (see seatType). Steffen and Wilma group by this classification
- * so it works for every layout, not just 3-3.
+ * so it works for every layout, not just 3-3. (open-seating.js has its own classifier that uses
+ * the cabin's outermost columns as "window", matching what a real passenger sees.)
  *
  * The sim (board-sim.js) applies the small extra twists after `order` returns: non-compliant
  * passengers swap into a random nearby slot (within 10 places), and every group member is pulled
  * adjacent to their first member. Those live in board-rules.js so strategies stay pure.
  */
 
-import { seatColumnInfo } from '../cabin.js';
+import { assignOpenSeating } from './open-seating.js';
 
 /**
  * "window" (max seatDepth in this block-side) / "middle" (in between) / "aisle" (depth 0). The
@@ -194,183 +196,43 @@ const reversePyramidStrategy = {
 const rotatingZoneStrategy = {
   id: 'rotating-zone',
   label: 'Rotating zone',
-  blurb: 'Board the back quarter, then the front quarter, then the two middle quarters, so the aisle keeps opening up somewhere new.',
+  blurb: 'Four bands: back quarter, then front quarter, then the second-from-back and second-from-front bands, alternating toward the middle. Order inside each band is random.',
   order(passengers, rng, cabin) {
+    // Alternating back/front bands per the Van den Briel / Nyquist framing of rotating zone.
+    // The published definition fixes the outer-to-inner band order but does not pin down the
+    // within-band ordering; a random within-band shuffle is the closest fit to that literature
+    // and matches how airline gate agents actually call the numbers. A back-to-front sort inside
+    // each band adds an internal back-to-front penalty on top and pushes the strategy out of the
+    // "same tier as back-to-front" cluster the survey (Jaehn & Neumann 2015) places it in.
     const rows = cabin?.rows ?? maxRow(passengers);
     const q1 = Math.max(1, Math.floor(rows * 0.25));
     const q2 = Math.max(q1 + 1, Math.floor(rows * 0.5));
     const q3 = Math.max(q2 + 1, Math.floor(rows * 0.75));
     const zoneOf = (row) => {
-      if (row > q3) return 0;   // back quarter
-      if (row <= q1) return 1;  // front quarter
-      if (row > q2) return 2;   // upper middle
-      return 3;                 // lower middle
+      if (row > q3) return 0;   // back quarter (boards first)
+      if (row <= q1) return 1;  // front quarter (boards second)
+      if (row > q2) return 2;   // second-from-back band
+      return 3;                 // second-from-front band
     };
     const zones = [[], [], [], []];
     for (const passenger of passengers) zones[zoneOf(passenger.row)].push(passenger);
     const result = [];
     for (const zone of zones) {
-      // Each rotating zone still boards back-to-front internally so passengers do not sit next to
-      // a walker in their own zone.
-      const sorted = zone.slice().sort((a, b) => b.row - a.row);
-      for (const passenger of sorted) result.push(passenger);
+      for (const passenger of rng.shuffle(zone)) result.push(passenger);
     }
-    // Break within-row ties with the rng so different seeds move around.
-    return jitterEqualRows(result, rng);
+    return result;
   },
 };
 
 const openSeatingStrategy = {
   id: 'open-seating',
   label: 'Open seating (Southwest)',
-  blurb: 'No assigned seats: each passenger walks in and grabs the front-most row with a free window, then middle, then aisle.',
+  blurb: 'No assigned seats. Passengers spread through the cabin and pick a seat that requires nobody to stand: an empty row (window first) if they can find one, else the aisle seat of a partially full row.',
   order(passengers, rng, cabin) {
     if (!cabin) throw new Error('open-seating needs the cabin to know which seats exist');
     return assignOpenSeating(passengers, rng, cabin);
   },
 };
-
-/**
- * Open-seating: clear every assigned seat, walk passengers up in a random arrival order, and give
- * each one the front-most row (with a 20% chance to skip 1-5 rows ahead) that still has a free
- * window; if no row has a free window, prefer a middle; then an aisle. Groups are seated together
- * on one block of one row whenever a block has enough contiguous free seats. Every re-seated
- * passenger has their block/aisle/side/depth fields refreshed from `seatColumnInfo`.
- */
-function assignOpenSeating(passengers, rng, cabin) {
-  // Group members share a groupId; we seat the whole group at once on the leader's turn.
-  const groups = new Map();
-  const solos = [];
-  for (const passenger of passengers) {
-    if (passenger.groupId === null) solos.push(passenger);
-    else {
-      if (!groups.has(passenger.groupId)) groups.set(passenger.groupId, []);
-      groups.get(passenger.groupId).push(passenger);
-    }
-  }
-  const occupied = new Set(); // keys = `${row}:${col}`
-  const seated = new Set();   // passenger ids that have picked a seat
-  const arrivalOrder = rng.shuffle(passengers);
-  const queue = [];
-  for (const arrival of arrivalOrder) {
-    if (seated.has(arrival.id)) continue;
-    const members = arrival.groupId !== null ? groups.get(arrival.groupId) : [arrival];
-    // Start row: front (row 1), or skip 1-5 rows ahead 20% of the time.
-    let startRow = 1;
-    if (rng.next() < 0.2) startRow = Math.min(cabin.rows, 1 + rng.int(1, 5));
-
-    let placed = false;
-    if (members.length >= 2) {
-      // Group: try each row for a block that has enough contiguous free seats.
-      placed = seatGroupTogether(members, startRow, cabin, occupied, seated, queue);
-    } else {
-      // Solo: front-most row with a free window, then middle, then aisle.
-      placed = seatSolo(arrival, startRow, cabin, occupied, seated, queue);
-    }
-    if (!placed) {
-      // Fallback: seat each remaining member wherever anything is free.
-      for (const member of members) {
-        if (seated.has(member.id)) continue;
-        seatSolo(member, 1, cabin, occupied, seated, queue);
-      }
-    }
-  }
-  return queue;
-}
-
-function seatSolo(passenger, startRow, cabin, occupied, seated, queue) {
-  const preferences = ['window', 'middle', 'aisle'];
-  for (const type of preferences) {
-    for (let offset = 0; offset < cabin.rows; offset += 1) {
-      const row = 1 + ((startRow - 1 + offset) % cabin.rows);
-      const col = findFreeSeatOfType(cabin, row, type, occupied);
-      if (col !== null) {
-        placePassenger(passenger, row, col, cabin, occupied, seated, queue);
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function seatGroupTogether(members, startRow, cabin, occupied, seated, queue) {
-  const size = members.length;
-  for (let offset = 0; offset < cabin.rows; offset += 1) {
-    const row = 1 + ((startRow - 1 + offset) % cabin.rows);
-    const contiguousCols = findContiguousFreeSeats(cabin, row, size, occupied);
-    if (contiguousCols !== null) {
-      for (let index = 0; index < members.length; index += 1) {
-        placePassenger(members[index], row, contiguousCols[index], cabin, occupied, seated, queue);
-      }
-      return true;
-    }
-  }
-  return false;
-}
-
-function placePassenger(passenger, row, col, cabin, occupied, seated, queue) {
-  passenger.row = row;
-  passenger.col = col;
-  const geometry = seatColumnInfo(cabin, col);
-  passenger.blockIndex = geometry.blockIndex;
-  passenger.aisleIndex = geometry.aisleIndex;
-  passenger.side = geometry.side;
-  passenger.seatDepth = geometry.seatDepth;
-  occupied.add(`${row}:${col}`);
-  seated.add(passenger.id);
-  queue.push(passenger);
-}
-
-function findFreeSeatOfType(cabin, row, type, occupied) {
-  // Windows are the two outermost columns of the whole row; aisles are every column with depth 0
-  // in any block; middles are everything else.
-  for (let col = 0; col < cabin.seatsPerRow; col += 1) {
-    if (occupied.has(`${row}:${col}`)) continue;
-    const isWindow = col === 0 || col === cabin.seatsPerRow - 1;
-    const info = seatColumnInfo(cabin, col);
-    const isAisle = info.seatDepth === 0;
-    let seatKind;
-    if (isWindow) seatKind = 'window';
-    else if (isAisle) seatKind = 'aisle';
-    else seatKind = 'middle';
-    if (seatKind === type) return col;
-  }
-  return null;
-}
-
-function findContiguousFreeSeats(cabin, row, size, occupied) {
-  // Contiguous seats can only sit inside one block (aisles break contiguity).
-  for (let blockIndex = 0; blockIndex < cabin.layout.length; blockIndex += 1) {
-    const start = cabin.blockStartCol[blockIndex];
-    const width = cabin.layout[blockIndex];
-    if (size > width) continue;
-    for (let offset = 0; offset + size <= width; offset += 1) {
-      const cols = [];
-      let allFree = true;
-      for (let index = 0; index < size; index += 1) {
-        const col = start + offset + index;
-        if (occupied.has(`${row}:${col}`)) { allFree = false; break; }
-        cols.push(col);
-      }
-      if (allFree) return cols;
-    }
-  }
-  return null;
-}
-
-/** Randomly reorder any run of passengers whose sort key came out equal, so ties break per seed. */
-function jitterEqualRows(list, rng) {
-  const result = [];
-  let index = 0;
-  while (index < list.length) {
-    let end = index + 1;
-    while (end < list.length && list[end].row === list[index].row) end += 1;
-    const chunk = list.slice(index, end);
-    for (const passenger of rng.shuffle(chunk)) result.push(passenger);
-    index = end;
-  }
-  return result;
-}
 
 /** Any passenger the type/side/parity buckets did not reach falls in at the end, in shuffled order. */
 function appendMissing(result, passengers, rng) {
