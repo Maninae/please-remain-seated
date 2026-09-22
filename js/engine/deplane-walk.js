@@ -92,14 +92,25 @@ function executeSwaps(state, dt, dtEps) {
   return swapped;
 }
 
+function isInTargetPair(passenger) {
+  const pair = passenger.walkTargetPair;
+  if (pair) return passenger.aisleCell === pair[0] || passenger.aisleCell === pair[1];
+  return passenger.aisleCell === passenger.walkTargetCell;
+}
+
 function arrivalCheck(passenger) {
-  if (passenger.walkPurpose === 'bag' && passenger.aisleCell === passenger.walkTargetCell) {
-    passenger.phase = P.RETRIEVING;
-    passenger.timer = Math.max(0, passenger.retrievalSeconds[0] || 0);
-    passenger.vis = Vis.BAG;
-    passenger.walkPurpose = null;
-    passenger.walkTargetCell = null;
-  }
+  if (passenger.walkPurpose !== 'bag') return;
+  const pair = passenger.walkTargetPair;
+  const arrived = pair
+    ? (passenger.aisleCell === pair[0] || passenger.aisleCell === pair[1])
+    : passenger.aisleCell === passenger.walkTargetCell;
+  if (!arrived) return;
+  passenger.phase = P.RETRIEVING;
+  passenger.timer = Math.max(0, passenger.retrievalSeconds[0] || 0);
+  passenger.vis = Vis.BAG;
+  passenger.walkPurpose = null;
+  passenger.walkTargetCell = null;
+  passenger.walkTargetPair = null;
 }
 
 /**
@@ -127,7 +138,7 @@ function walkStep(passenger, state, dt, cabin, doorServiceSeconds, forbidden, dt
     return;
   }
 
-  if (passenger.walkPurpose === 'bag' && passenger.aisleCell === passenger.walkTargetCell) {
+  if (passenger.walkPurpose === 'bag' && isInTargetPair(passenger)) {
     arrivalCheck(passenger);
     accountStep(passenger, 'bags', dt);
     return;

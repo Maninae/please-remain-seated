@@ -7,12 +7,22 @@
  *   Row-mate index and readiness       : indexRowMates / rowMatesCleared / rowSideKeyFor
  *   Strategy permission (group-aware)  : computeGroupPermits / strategyPermits
  *   Contest arbitration                : arbitrateContests / findContestingWalker
+ *   Row-pair helpers                   : rowCellPair / bagAccessCells
+ *
+ * Row-pair rule (matches physical geometry: a row of 0.79 m pitch spans TWO 0.4 m aisle cells,
+ * so passengers stepping in from the left and right blocks can occupy different cells of the
+ * same row):
+ *   A READY passenger may claim EITHER cell of their row's pair (rowToCell(row) preferred, the
+ *   aft cell rowToCell(row) + 1 taken when the forward one is unavailable). Bag retrieval works
+ *   at either cell of the bin-access row's pair. Egress still holds the claimed cell; contests
+ *   resolve against the walker behind whichever cell the stander actually claims.
  *
  * Contest rule (see design/03-engine-contract.md "Deplaning rules"):
- *   For each READY passenger, target cell C = rowToCell(row). If C is empty and a walker one
- *   cell "behind" on the door-flow side would advance into C this step, the walker's `yields`
- *   trait decides. yields=true -> stander wins and the walker is barred from C this step;
- *   yields=false -> walker wins; stander waits.
+ *   For each READY passenger, the target is the pair of cells beside their row. For each empty
+ *   cell in the pair, if a walker one cell "behind" on the door-flow side would advance into it
+ *   this step, the walker's `yields` trait decides. yields=true -> stander wins that cell and
+ *   the walker is barred from it this step; yields=false -> walker wins; the stander tries the
+ *   other cell, and if both cells go to non-yielding walkers, waits.
  */
 
 import { DeplanePhase, EMPTY_CELL } from './types.js';
@@ -94,8 +104,10 @@ export function strategyPermits(passenger, strategy, state, groupPermits) {
  *   standers   Array<{ passenger, aisleIndex, cell }>  claim their aisle cell as STEPPING_OUT
  *   forbidden  Set<`${aisleIndex}:${cell}`>            cells walkers must not enter this step
  *
- * Two aisle-seat neighbours in one row competing for the same cell are resolved by id order,
- * so the tie-break is deterministic per seed.
+ * For each stander, try the forward cell of their row's pair first; if that cell is taken (or
+ * lost to a non-yielding walker), try the aft cell. If both cells fail, the passenger waits.
+ * Aisle-seat neighbours from the two sides of a row now naturally share the pair: one may claim
+ * forward and the other aft. Ties within a single cell are still resolved by ascending id.
  */
 export function arbitrateContests(state, strategy, groupPermits, rowMatesIndex, dtEps) {
   const standers = [];
@@ -111,15 +123,23 @@ export function arbitrateContests(state, strategy, groupPermits, rowMatesIndex, 
     if (!rowMatesCleared(passenger, rowMates)) continue;
     if (!strategyPermits(passenger, strategy, state, groupPermits)) continue;
     const aisleIndex = passenger.aisleIndex;
-    const cell = rowToCell(state.cabin, passenger.row);
-    const key = `${aisleIndex}:${cell}`;
-    if (claimed.has(key)) continue;
-    if (!isCellEmpty(state, aisleIndex, cell)) continue;
-    const walker = findContestingWalker(state, aisleIndex, cell, dtEps);
-    if (walker && !walker.yields) continue;
-    standers.push({ passenger, aisleIndex, cell });
-    claimed.add(key);
-    if (walker) forbidden.add(key);
+    const pair = rowCellPair(state.cabin, passenger.row);
+    let chosenCell = null;
+    let chosenWalker = null;
+    for (const cell of pair) {
+      const key = `${aisleIndex}:${cell}`;
+      if (claimed.has(key)) continue;
+      if (!isCellEmpty(state, aisleIndex, cell)) continue;
+      const walker = findContestingWalker(state, aisleIndex, cell, dtEps);
+      if (walker && !walker.yields) continue;
+      chosenCell = cell;
+      chosenWalker = walker;
+      break;
+    }
+    if (chosenCell === null) continue;
+    standers.push({ passenger, aisleIndex, cell: chosenCell });
+    claimed.add(`${aisleIndex}:${chosenCell}`);
+    if (chosenWalker) forbidden.add(`${aisleIndex}:${chosenCell}`);
   }
   return { standers, forbidden };
 }
@@ -157,12 +177,21 @@ export function findContestingWalker(state, aisleIndex, cell, dtEps) {
   return null;
 }
 
-// -------------------- bag routing helper --------------------
+// -------------------- row-pair helpers --------------------
 
 /**
- * The per-aisle cell where a passenger stands to reach their next bag: rowToCell of the row
- * binAccessRow returns for that bin. Handy for both routeInAisle and the tests.
+ * The two aisle cells that sit beside a row: [forwardCell, aftCell]. A row of 0.79 m pitch spans
+ * two 0.4 m aisle cells; both are legitimate stepping-in cells for the row-mates of that row.
  */
-export function bagAccessCell(cabin, passenger, binIdx) {
-  return rowToCell(cabin, binAccessRow(cabin, passenger.row, binIdx));
+export function rowCellPair(cabin, row) {
+  const forward = rowToCell(cabin, row);
+  return [forward, forward + 1];
+}
+
+/**
+ * The pair of aisle cells that a passenger can reach their next bag at: both cells of the row
+ * that `binAccessRow` returns for the bin.
+ */
+export function bagAccessCells(cabin, passenger, binIdx) {
+  return rowCellPair(cabin, binAccessRow(cabin, passenger.row, binIdx));
 }
