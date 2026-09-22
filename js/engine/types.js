@@ -1,0 +1,98 @@
+/**
+ * Shared enums and the state shapes every module codes against. Pure data, no logic.
+ *
+ * Sim state (`state`), produced by deplane-sim.js and board-sim.js, read by the renderer and metrics:
+ *   {
+ *     mode: 'deplane' | 'board',
+ *     t: seconds since the start,
+ *     cabin: see cabin.js (carries layout, aisleCount, per-column geometry, per-bin capacities),
+ *     passengers: Passenger[]  (passengers[i].id === i),
+ *     aisles: Int32Array[]     one per aisle, length cabin.cellsPerAisle, holding passenger ids or EMPTY_CELL,
+ *     bins: see bins.js        ({ counts: Int32Array, capacities: Int32Array, binsPerBlock, blockCount }),
+ *     doneCount: passengers exited (deplane) or seated (board),
+ *     done: boolean,
+ *     seed: string | number,
+ *     strategyId: string,
+ *   }
+ *
+ * Passenger (sampled by passengers.js, mutated only by the sim that owns the state):
+ *   {
+ *     id,
+ *     row (1-based),
+ *     col (0-based, global across the row; letter is seatColumnInfo(cabin, col).letter),
+ *     blockIndex (0-based, which seat block the col falls into),
+ *     aisleIndex (0-based, which aisle this passenger uses to enter or exit),
+ *     side (0 aisle-to-my-right, 1 aisle-to-my-left),
+ *     seatDepth (0 aisle seat, 1 next in, 2 window in a 3-wide, etc.),
+ *     bagCount,
+ *     bagBins: number[]        (global bin index per bag, filled by bins.js placement),
+ *     walkSecondsPerCell,
+ *     prepSeconds,
+ *     retrievalSeconds: number[]  (per bag),
+ *     stowSeconds: number[]       (per bag),
+ *     yields: boolean, compliant: boolean, groupId: number | null, doorGapSeconds,
+ *     phase: DeplanePhase | BoardPhase,
+ *     vis: Vis,
+ *     aisleCell: number | null,   (index into state.aisles[aisleIndex]),
+ *     timer: seconds left in the current phase,
+ *     timeSplit: { seatedWait, aisleBlocked, bags, walking } seconds,
+ *   }
+ * The sim may add private bookkeeping fields; the renderer relies only on row, col, aisleIndex,
+ * phase, vis, aisleCell.
+ */
+
+export const EMPTY_CELL = -1;
+
+export const SimMode = Object.freeze({
+  DEPLANE: 'deplane',
+  BOARD: 'board',
+});
+
+export const DeplanePhase = Object.freeze({
+  SEATED: 'seated',             // prep timer running
+  READY: 'ready',               // wants to stand; waiting on row-mates, strategy permission, or an empty cell
+  STEPPING_OUT: 'stepping_out', // egress timer running, aisle cell already claimed
+  IN_AISLE: 'in_aisle',         // standing in the aisle, deciding what to do next
+  RETRIEVING: 'retrieving',     // pulling a bag from the bin, blocking the cell
+  WALKING: 'walking',           // moving toward a door, follow-the-leader
+  EXITED: 'exited',
+});
+
+export const BoardPhase = Object.freeze({
+  QUEUED: 'queued',                       // not yet through the door
+  WALKING: 'walking',                     // moving aft toward the seat row (or toward a bin with space)
+  STOWING: 'stowing',                     // lifting a bag into the bin, blocking the cell
+  SEAT_INTERFERENCE: 'seat_interference', // waiting for seated row-mates to step out and back in
+  DISPLACED: 'displaced',                 // a seated passenger standing in the aisle to let a row-mate in
+  SEATED: 'seated',
+});
+
+/**
+ * Visual state, recomputed by the sim every step. The renderer maps these to colour and never
+ * inspects phases, so both sims render through one code path.
+ */
+export const Vis = Object.freeze({
+  SEATED: 'seated',    // in seat, not trying to move
+  READY: 'ready',      // in seat, wants to stand
+  MOVING: 'moving',    // in the aisle and advanced this step (or its walk timer is running)
+  BLOCKED: 'blocked',  // in the aisle, wants to advance, cell ahead occupied
+  BAG: 'bag',          // handling a bag at the bin
+  DONE: 'done',        // exited (deplane); seated for good (board) uses SEATED
+});
+
+export const TimeBucket = Object.freeze({
+  SEATED_WAIT: 'seatedWait',
+  AISLE_BLOCKED: 'aisleBlocked',
+  BAGS: 'bags',
+  WALKING: 'walking',
+});
+
+export function createEmptyTimeSplit() {
+  return { seatedWait: 0, aisleBlocked: 0, bags: 0, walking: 0 };
+}
+
+/**
+ * Base seat letters. For any cabin, the letter for a col is String.fromCharCode(65 + col); this
+ * constant is retained for callers that want the first six letters as a quick default.
+ */
+export const SEAT_LETTERS = Object.freeze(['A', 'B', 'C', 'D', 'E', 'F']);
