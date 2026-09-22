@@ -102,7 +102,14 @@ export function createCabinView(canvas, options = {}) {
 
   if (cabin) setCabin(cabin);
 
-  return { draw: wrappedDraw, setCabin, resize, hitTest };
+  function passengerCanvasPoint(passenger) {
+    // Used by the UI to overlay a follow-ring on the followed passenger. Returns the CSS-pixel
+    // point where cabin-view drew the passenger this frame, or null when the passenger is not
+    // currently visible (vis === 'done', or no geometry yet).
+    if (!geometry || !passenger) return null;
+    return passengerPoint(geometry, passenger);
+  }
+  return { draw: wrappedDraw, setCabin, resize, hitTest, passengerCanvasPoint };
 }
 
 // -------------- drawing passes --------------

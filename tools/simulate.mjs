@@ -17,6 +17,9 @@
 import { runBatch, quantile, seedList } from '../js/batch.js';
 import { CABIN_PRESET_BY_ID, DEFAULT_CABIN_PRESET_ID } from '../js/engine/cabin-presets.js';
 import { DEPLANE_STRATEGIES } from '../js/engine/strategies/deplane.js';
+import { BOARD_STRATEGIES } from '../js/engine/strategies/board.js';
+
+const STRATEGY_LIST_BY_MODE = { deplane: DEPLANE_STRATEGIES, board: BOARD_STRATEGIES };
 
 function parseArgs(argv) {
   const args = { mode: 'deplane', strategy: 'all', seeds: 30, preset: DEFAULT_CABIN_PRESET_ID };
@@ -36,10 +39,12 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node tools/simulate.mjs --mode deplane --strategy all|<id> --seeds 30 --preset a320
+  console.log(`Usage: node tools/simulate.mjs --mode deplane|board --strategy all|<id> --seeds 30 --preset a320
                              [--compliance 0.85] [--groups 0.25] [--rear-door]`);
   console.log(`\nDeplane strategies:`);
   for (const strat of DEPLANE_STRATEGIES) console.log(`  ${strat.id.padEnd(20)} ${strat.blurb}`);
+  console.log(`\nBoard strategies:`);
+  for (const strat of BOARD_STRATEGIES) console.log(`  ${strat.id.padEnd(20)} ${strat.blurb}`);
 }
 
 function cabinOverridesFromPreset(preset, extraRearDoor) {
@@ -61,10 +66,11 @@ function passengerOverridesFromArgs(args) {
 }
 
 function chooseStrategies(args) {
-  if (args.mode !== 'deplane') throw new Error(`only deplane mode is supported here; got ${args.mode}`);
-  if (args.strategy === 'all') return DEPLANE_STRATEGIES;
-  const found = DEPLANE_STRATEGIES.find((strat) => strat.id === args.strategy);
-  if (!found) throw new Error(`unknown deplaning strategy: ${args.strategy}`);
+  const list = STRATEGY_LIST_BY_MODE[args.mode];
+  if (!list) throw new Error(`unknown mode: ${args.mode} (expected deplane|board)`);
+  if (args.strategy === 'all') return list;
+  const found = list.find((strat) => strat.id === args.strategy);
+  if (!found) throw new Error(`unknown ${args.mode} strategy: ${args.strategy}`);
   return [found];
 }
 
@@ -100,7 +106,7 @@ async function main() {
 
   printTable(rows, { preset, seeds: args.seeds, passengerOverrides, rearDoor: !!args.rearDoor });
   const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(2);
-  console.log(`\n(${strategies.length} strategy${strategies.length === 1 ? '' : 'ies'}, ${args.seeds} seeds each, ${elapsedSeconds}s wall)`);
+  console.log(`\n(${strategies.length} ${strategies.length === 1 ? 'strategy' : 'strategies'}, ${args.seeds} seeds each, ${elapsedSeconds}s wall)`);
 }
 
 function printTable(rows, meta) {

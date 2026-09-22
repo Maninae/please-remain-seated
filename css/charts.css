@@ -1,0 +1,117 @@
+/*
+ * Compare section (Monte Carlo strips) and explainer collapse.
+ */
+
+.compare {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.compare .header {
+  display: flex;
+  gap: 12px 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.compare .header .title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.compare .header .subtitle {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.compare .controls-row {
+  display: flex;
+  align-items: center;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+}
+.compare .controls-row label { font-size: 12px; }
+
+.compare .progress {
+  height: 4px;
+  width: 100%;
+  background: var(--paper-2);
+  border-radius: 999px;
+  overflow: hidden;
+  display: none;
+}
+.compare .progress.on { display: block; }
+.compare .progress .bar {
+  height: 100%;
+  background: var(--moving);
+  width: 0%;
+  transition: width 0.15s linear;
+}
+
+.compare .strips-wrap {
+  min-height: 60px;
+  width: 100%;
+  overflow-x: auto;
+}
+.compare .strips-wrap svg { display: block; width: 100%; height: auto; }
+.compare .empty {
+  color: var(--ink-muted);
+  font-size: 13px;
+  padding: 22px 0;
+  text-align: center;
+}
+
+.deplane-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  min-height: 40px;
+}
+
+.explainer {
+  margin-top: var(--gap-l);
+}
+.explainer summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.explainer summary::-webkit-details-marker { display: none; }
+.explainer summary::before {
+  content: "+";
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+.explainer[open] summary::before { content: "\2013"; }
+.explainer .body {
+  padding: 14px 4px 4px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.explainer .body ul {
+  padding-left: 20px;
+  margin: 0 0 12px;
+}
+.explainer .body li { margin: 4px 0; }
+.explainer .body a { color: var(--ink); }

@@ -1,0 +1,247 @@
+/*
+ * Base tokens and page-wide layout for Please Remain Seated.
+ *
+ * Tokens mirror js/render/theme.js so the CSS chrome sits in the same palette as the canvas
+ * and SVG marks. Type is Barlow with a real fallback stack; the only saturated colour on the
+ * page is exit-sign green (for moving) and seatbelt amber (for bag work). Everything else is
+ * a warm gray on paper.
+ */
+
+:root {
+  --paper: #f4efe6;
+  --paper-2: #ece5d6;
+  --ink: #1f2a33;
+  --ink-soft: rgba(31, 42, 51, 0.72);
+  --ink-muted: rgba(31, 42, 51, 0.55);
+  --ink-faint: rgba(31, 42, 51, 0.28);
+  --rule: #c9c2b4;
+  --seat-fill: #e6dfd2;
+  --seat-stroke: #b8b0a0;
+  --moving: #1f8a4c;
+  --bag: #e0a100;
+
+  --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --font-num: "Barlow", "Helvetica Neue", Arial, sans-serif;
+
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 14px;
+
+  --gap-xs: 6px;
+  --gap-s: 10px;
+  --gap-m: 16px;
+  --gap-l: 22px;
+  --gap-xl: 32px;
+
+  --page-side: clamp(16px, 4vw, 40px);
+  --page-max: 1080px;
+
+  --tap: 44px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.42;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.page {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 28px var(--page-side) 60px;
+}
+
+/* Masthead */
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-m);
+  margin-bottom: var(--gap-l);
+}
+
+.masthead .title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.masthead h1 {
+  font-size: clamp(22px, 3.4vw, 30px);
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  margin: 0;
+  color: var(--ink);
+}
+
+.masthead .deck {
+  color: var(--ink-soft);
+  font-size: clamp(13px, 1.6vw, 15px);
+  margin: 0;
+  max-width: 62ch;
+}
+
+/* Segmented control (mode toggle, speed) */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  padding: 3px;
+  gap: 2px;
+  align-items: stretch;
+}
+
+.segmented .seg {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  min-height: 32px;
+  border-radius: 999px;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+}
+
+.segmented .seg:hover { color: var(--ink); }
+.segmented .seg[aria-pressed="true"],
+.segmented .seg.on {
+  background: var(--ink);
+  color: var(--paper);
+}
+.segmented .seg:focus-visible {
+  outline: 2px solid var(--moving);
+  outline-offset: 2px;
+}
+
+/* Generic inputs */
+
+button, .btn {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  padding: 8px 16px;
+  min-height: 36px;
+  border-radius: 999px;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+}
+button:hover, .btn:hover { border-color: var(--ink); }
+button:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--moving);
+  outline-offset: 2px;
+}
+
+button.primary, .btn.primary {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+button.primary:hover, .btn.primary:hover { background: #0f1a24; }
+
+select {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  padding: 6px 28px 6px 10px;
+  min-height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-soft) 50%),
+                    linear-gradient(-45deg, transparent 50%, var(--ink-soft) 50%);
+  background-position: right 12px top 50%, right 8px top 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+select:focus-visible { outline: 2px solid var(--moving); outline-offset: 2px; }
+
+input[type="range"] {
+  width: 100%;
+  min-height: var(--tap);
+}
+
+input[type="text"], input[type="number"] {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  border-radius: 6px;
+  padding: 6px 10px;
+  min-height: 32px;
+}
+
+label { color: var(--ink-soft); font-size: 13px; }
+
+/* Sections */
+
+.section {
+  margin: var(--gap-xl) 0;
+}
+
+.section-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-muted);
+  font-weight: 600;
+  margin: 0 0 var(--gap-s);
+}
+
+/* Footer */
+
+.footer {
+  margin-top: 60px;
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-muted);
+  font-size: 12px;
+  display: flex;
+  gap: var(--gap-m);
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.footer a { color: var(--ink-muted); text-decoration: underline; text-underline-offset: 3px; }
+.footer a:hover { color: var(--ink); }
+
+/* Utility */
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.mono-num { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
