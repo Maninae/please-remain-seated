@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Renderer mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #f4efe6;
+    --ink: #1f2a33;
+    --rule: #c9c2b4;
+  }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); font-family: "Barlow", "Helvetica Neue", Arial, sans-serif; }
+  body { padding: 24px 20px 60px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; letter-spacing: 0.01em; }
+  .subtitle { color: rgba(31,42,51,0.65); font-size: 13px; margin: 0 0 22px; }
+  .row { margin: 0 0 26px; }
+  .row-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(31,42,51,0.75); margin: 0 0 6px; }
+  canvas { display: block; background: var(--paper); }
+  .horiz-canvas { width: 100%; max-width: 1080px; height: 180px; }
+  .horiz-canvas.tall { height: 220px; }
+  .horiz-canvas.wide { height: 260px; }
+  .vertical-wrap { display: flex; gap: 24px; align-items: flex-start; }
+  .vertical-canvas { width: 300px; height: 640px; }
+  .chart-wrap { max-width: 720px; }
+  svg { display: block; }
+  .charts { display: grid; grid-template-columns: 1fr; gap: 20px; }
+</style>
+</head>
+<body>
+<h1>Renderer mock</h1>
+<p class="subtitle">Synthetic mid-deplaning state. No engine step, no worker. Cabins render straight from js/render/cabin-view.js; charts from js/render/charts.js.</p>
+
+<section class="row">
+  <p class="row-title">A320 (3-3), 30 rows, front door only, horizontal</p>
+  <canvas id="cabin-a320" class="horiz-canvas"></canvas>
+</section>
+
+<section class="row">
+  <p class="row-title">CRJ-700 (2-2), 17 rows, front door only, horizontal</p>
+  <canvas id="cabin-crj" class="horiz-canvas tall"></canvas>
+</section>
+
+<section class="row">
+  <p class="row-title">777 (3-4-3), 36 rows, both doors, horizontal</p>
+  <canvas id="cabin-777" class="horiz-canvas wide"></canvas>
+</section>
+
+<section class="row">
+  <p class="row-title">A320 (3-3), 30 rows, vertical (phone width)</p>
+  <div class="vertical-wrap">
+    <canvas id="cabin-a320-v" class="vertical-canvas"></canvas>
+  </div>
+</section>
+
+<section class="row">
+  <p class="row-title">Charts</p>
+  <div class="charts">
+    <div class="chart-wrap"><svg id="strips" width="720" height="300"></svg></div>
+    <div class="chart-wrap"><svg id="split" width="720" height="70"></svg></div>
+  </div>
+</section>
+
+<script type="module">
+  import { createCabin } from '../js/engine/cabin.js';
+  import { createCabinView } from '../js/render/cabin-view.js';
+  import { renderStrips, renderTimeSplit } from '../js/render/charts.js';
+  import { createMockDeplaningState, mockStrategySeries, mockTimeSplit } from '../js/render/mock-state.js';
+
+  function mountCabin(canvasId, cabinOverrides, orientation, seed) {
+    const canvas = document.getElementById(canvasId);
+    const cabin = createCabin(cabinOverrides);
+    const state = createMockDeplaningState(cabin, { seed });
+    const view = createCabinView(canvas, { orientation, cabin });
+    view.resize();
+    view.draw(state);
+    // Redraw on window resize so the mock stays readable at any width.
+    const onResize = () => { view.resize(); view.draw(state); };
+    window.addEventListener('resize', onResize);
+    return { canvas, view, state };
+  }
+
+  mountCabin('cabin-a320', { layout: [3, 3], rows: 30, rearDoor: false }, 'horizontal', 11);
+  mountCabin('cabin-crj', { layout: [2, 2], rows: 17, rearDoor: false }, 'horizontal', 22);
+  mountCabin('cabin-777', { layout: [3, 4, 3], rows: 36, rearDoor: true }, 'horizontal', 33);
+  mountCabin('cabin-a320-v', { layout: [3, 3], rows: 30, rearDoor: false }, 'vertical', 44);
+
+  renderStrips(document.getElementById('strips'), mockStrategySeries(), {
+    title: 'Free-for-all is the middle: two doors halves it, back-to-front doubles it.',
+    width: 720,
+  });
+  renderTimeSplit(document.getElementById('split'), mockTimeSplit(), {
+    title: 'Time split, the last passenger off',
+    width: 720,
+  });
+</script>
+</body>
+</html>
