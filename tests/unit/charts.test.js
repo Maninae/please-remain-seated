@@ -90,7 +90,8 @@ test('renderStrips: the median tick x matches the numeric median', () => {
   renderStrips(svg, [{ id: 'only', label: 'Only', values }], { width: 800 });
   const medianSeconds = 180;
   const paddedMax = niceCeiling(300);
-  const chartX0 = 130;
+  // STRIPS_PADDING_LEFT was widened to 200 in round-05 to fit longer airline labels.
+  const chartX0 = 200;
   const chartX1 = 800 - 24;
   const expectedX = chartX0 + (medianSeconds / paddedMax) * (chartX1 - chartX0);
   const lines = findAll(svg, 'line');
