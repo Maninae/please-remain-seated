@@ -1,35 +1,44 @@
 /**
- * Personal-best per (mode, preset, strategy pair, key knobs). Stored per browser in localStorage,
+ * Personal-best per (mode, preset, matchup, key knobs). Stored per browser in localStorage,
  * survives across sessions, ignores storage failures.
  *
- * Keyed by a compact hash of the settings that materially change the race, so switching the
- * plane, strategies, or bins gives you a fresh leaderboard. Compliance and families are
- * rounded to 5% buckets since a millimetre-tuned slider should not fork the PB.
+ * What "best" means (NEW-m1 in round-02 critic): it is the biggest MARGIN a player has produced
+ * with a specific winning strategy against a specific opposing strategy under one setup. That is
+ * a number a player can actually earn: a bigger win with Two doors is a bigger PB, and the seed
+ * is the free variable, not part of the key. The pre-round-02 "fastest time we ever rolled"
+ * PB was a lottery. Keying by winner+loser also stops two different strategies from stomping on
+ * each other's records.
+ *
+ * Keyed by a compact hash of the settings that materially change the race: mode, preset, the
+ * ordered pair (winnerStrategy, loserStrategy), bins, load / compliance / families bucketed to
+ * 5% so a millimetre-tuned slider does not fork the PB.
  *
  * Public API:
  *   const pb = createPersonalBestStore()
- *   const record = pb.recordFinish(state, winnerLane, seconds)     // returns { improved, best, previous }
- *   const current = pb.currentBest(state)                          // may be null
+ *   const record = pb.recordFinish(state, winnerLane, marginSeconds)   // { improved, best, previous }
+ *   const current = pb.currentBest(state)                              // may be null
  */
 
-const STORAGE_KEY = 'prs.personal-best';
+const STORAGE_KEY = 'prs.personal-best.v2';
 
 export function createPersonalBestStore() {
   const cache = readAll();
 
   function currentBest(state) {
-    const key = keyFor(state);
+    const key = keyFor(state, null, null);
     return cache[key] || null;
   }
 
-  function recordFinish(state, winnerLane, seconds) {
-    const key = keyFor(state);
+  function recordFinish(state, winnerLane, marginSeconds) {
+    const { winnerId, loserId } = matchupIds(state, winnerLane);
+    const key = keyFor(state, winnerId, loserId);
     const previous = cache[key] || null;
-    const isBetter = !previous || seconds < previous.seconds;
+    const isBetter = !previous || marginSeconds > previous.marginSeconds;
     if (isBetter) {
       const record = {
-        seconds,
-        strategy: winnerLaneStrategyLabel(state, winnerLane),
+        marginSeconds,
+        winnerStrategy: winnerId,
+        loserStrategy: loserId,
         seed: state.seed,
         atMs: Date.now(),
       };
@@ -43,14 +52,23 @@ export function createPersonalBestStore() {
   return { currentBest, recordFinish };
 }
 
-function keyFor(state) {
-  const strategies = state.mode === 'deplane'
-    ? [state.strategyA, state.strategyB].sort()
-    : [state.boardStrategyA, state.boardStrategyB].sort();
+function matchupIds(state, winnerLane) {
+  if (state.mode === 'deplane') {
+    return winnerLane === 0
+      ? { winnerId: state.strategyA, loserId: state.strategyB }
+      : { winnerId: state.strategyB, loserId: state.strategyA };
+  }
+  return winnerLane === 0
+    ? { winnerId: state.boardStrategyA, loserId: state.boardStrategyB }
+    : { winnerId: state.boardStrategyB, loserId: state.boardStrategyA };
+}
+
+function keyFor(state, winnerId, loserId) {
   const parts = [
     state.mode,
     state.presetId,
-    strategies.join('|'),
+    winnerId || 'winner',
+    loserId || 'loser',
     state.bins,
     bucket(state.loadFactor),
     bucket(state.compliance),
@@ -61,11 +79,6 @@ function keyFor(state) {
 
 function bucket(value) {
   return Math.round(Number(value) * 20) / 20;
-}
-
-function winnerLaneStrategyLabel(state, winnerLane) {
-  const which = winnerLane === 0 ? 'A' : 'B';
-  return state.mode === 'deplane' ? state[`strategy${which}`] : state[`boardStrategy${which}`];
 }
 
 function readAll() {

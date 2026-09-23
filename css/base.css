@@ -18,6 +18,7 @@
   --seat-fill: #e6dfd2;
   --seat-stroke: #b8b0a0;
   --moving: #1f8a4c;
+  --blocked: #4a4740;
   --bag: #e0a100;
 
   --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
@@ -309,30 +310,41 @@ label { color: var(--ink-soft); font-size: 13px; }
   margin: var(--gap-xl) 0;
 }
 
-.section-title {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
+/* Sentence-case section headings above the compare and time-split blocks. Sized larger than
+ * their sub-line and never in all-caps micro-type (m3 in the round-01 pass carried over into
+ * round-02 as the "seven letterspaced micro-labels" complaint). */
+.section-heading {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 2px;
+  letter-spacing: 0.005em;
+}
+.section-sub {
+  margin: 0;
+  font-size: 13px;
   color: var(--ink-muted);
-  font-weight: 600;
-  margin: 0 0 var(--gap-s);
+  line-height: 1.45;
 }
 
-/* Finish card (winner + margin + settings + copy-link, drawn between the race and controls) */
+/* Finish card (winner + margin + settings + copy-link, drawn directly under lane B). Meant to
+ * sit inside the viewport at the moment the race ends: race.js scrolls the second cabin card
+ * and this card into view together on finish (NEW-B1). */
 
 .finish-card {
-  margin-top: var(--gap-m);
+  margin-top: var(--gap-s);
   background: var(--paper-2);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--ink);
   border-radius: var(--radius-l);
   padding: 14px 18px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px 18px;
   align-items: center;
+  box-shadow: 0 1px 0 rgba(31, 42, 51, 0.06);
 }
 .finish-card .headline {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--ink);
   line-height: 1.35;
@@ -361,8 +373,8 @@ label { color: var(--ink-soft); font-size: 13px; }
   min-width: 160px;
 }
 .finish-card .actions button {
-  min-height: 32px;
-  padding: 6px 12px;
+  min-height: 40px;
+  padding: 8px 14px;
   font-size: 13px;
 }
 .finish-card .pb {
@@ -373,8 +385,9 @@ label { color: var(--ink-soft); font-size: 13px; }
 .finish-card .pb.new { color: var(--moving); font-weight: 600; }
 
 @media (max-width: 620px) {
-  .finish-card { grid-template-columns: 1fr; }
-  .finish-card .actions { grid-column: 1; grid-row: auto; min-width: 0; }
+  .finish-card { grid-template-columns: 1fr; padding: 12px 14px; }
+  .finish-card .actions { grid-column: 1; grid-row: auto; min-width: 0; flex-direction: row; }
+  .finish-card .actions button { flex: 1 1 auto; }
   .finish-card .pb { text-align: left; }
 }
 

@@ -7,7 +7,8 @@
     "test": "node --test tests/unit/*.test.js",
     "test:e2e": "node --test tests/e2e/*.test.js",
     "serve": "python3 -m http.server 5197",
-    "sim": "node tools/simulate.mjs"
+    "sim": "node tools/simulate.mjs",
+    "og": "node tools/og-image.mjs"
   },
   "devDependencies": {
     "playwright": "1.58.2"

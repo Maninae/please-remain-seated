@@ -32,11 +32,8 @@ const CANVAS_MARGIN_PX = 14;
 // Seat rectangle fills this fraction of its cell; leaves a hairline gap so blocks read as blocks.
 const SEAT_FILL_FRACTION = 0.86;
 
-// Bin segment length along the long axis, as a fraction of one bin-row group.
-const BIN_STRIP_LENGTH_FRACTION = 0.94;
-
-// Bin strip thickness along the cross axis, as a fraction of its allotted units.
-const BIN_STRIP_CROSS_FRACTION = 0.72;
+// Bin segment sizing constants live in cabin-layout-bins.js; the strip geometry pass lives there.
+import { computeBinStrips } from './cabin-layout-bins.js';
 
 // Door gap in the fuselage side wall, expressed in aisle cells.
 const DOOR_GAP_CELLS = 3;
@@ -215,36 +212,17 @@ export function computeGeometry(cabin, canvasWidth, canvasHeight, orientation = 
     }
   }
 
-  // Bin strips. Each strip is split into segments of binRowsPerBin rows (the last segment may
-  // cover fewer rows if rows do not divide evenly). Segments are indexed with a running counter,
-  // block by block and segment within block, matching the natural generalization of bin indexing.
-  const binStrips = [];
-  const segmentsPerBlock = Math.ceil(cabin.rows / cabin.binRowsPerBin);
-  const rowsBinLongPx = cabin.binRowsPerBin * rowLongPx;
-  for (let s = 0; s < cross.binSpecs.length; s += 1) {
-    const spec = cross.binSpecs[s];
-    const stripCrossHalf = (spec.widthUnits * crossUnitPx * BIN_STRIP_CROSS_FRACTION) / 2;
-    const stripCrossCentre = crossPx(spec.leftUnits + spec.widthUnits / 2);
-    const segments = [];
-    for (let g = 0; g < segmentsPerBlock; g += 1) {
-      const firstRow = 1 + g * cabin.binRowsPerBin;
-      const lastRow = Math.min(cabin.rows, firstRow + cabin.binRowsPerBin - 1);
-      const firstRowCellStart = cabin.frontGalleyCells + (firstRow - 1) * cabin.aisleCellsPerRow;
-      const lastRowCellEnd = cabin.frontGalleyCells + lastRow * cabin.aisleCellsPerRow;
-      const groupLongCentre = longPx((firstRowCellStart + lastRowCellEnd) / 2);
-      const groupLongHalf = ((lastRowCellEnd - firstRowCellStart) * cellLongPx * BIN_STRIP_LENGTH_FRACTION) / 2;
-      segments.push({
-        binIndex: s * segmentsPerBlock + g,
-        rowFirst: firstRow, rowLast: lastRow,
-        ...rectFromBounds(
-          groupLongCentre - groupLongHalf, groupLongCentre + groupLongHalf,
-          stripCrossCentre - stripCrossHalf, stripCrossCentre + stripCrossHalf,
-          horizontal,
-        ),
-      });
-    }
-    binStrips.push({ blockIndex: spec.blockIndex, side: spec.side, segments });
-  }
+  // Bin strips (segments of binRowsPerBin rows each, running counter across blocks).
+  const binStrips = computeBinStrips(
+    cabin,
+    cross.binSpecs,
+    {
+      rowLongPx, cellLongPx, crossUnitPx,
+      crossPx, longPx,
+    },
+    (longStart, longEnd, crossStart, crossEnd) =>
+      rectFromBounds(longStart, longEnd, crossStart, crossEnd, horizontal),
+  );
 
   // Row-number labels (rows 5, 10, ... plus the last row, but only when the last row is far
   // enough past the previous label that the two do not visually collide at narrow canvas widths).

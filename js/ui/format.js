@@ -1,5 +1,9 @@
 /**
- * Small formatters shared by race.js, controls.js, compare.js.
+ * Small formatters shared by race.js, controls.js, compare.js, and the finish card.
+ *
+ * `formatSplitTitle` was retired in round 02: it was dead code (imported by nothing) and it
+ * exposed an internal passenger array index as `passenger #67`, which is not a thing the reader
+ * has any way to look up (NEW-n2 in the round-02 critic pass).
  */
 
 export function formatClock(seconds) {
@@ -8,11 +12,6 @@ export function formatClock(seconds) {
   const minutes = Math.floor(total / 60);
   const secs = total - minutes * 60;
   return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
-}
-
-export function formatSplitTitle(passenger) {
-  const bagText = passenger.bagCount === 1 ? '1 bag' : `${passenger.bagCount} bags`;
-  return `passenger #${passenger.id + 1} · row ${passenger.row} · ${bagText}`;
 }
 
 export function formatPercent(value) {

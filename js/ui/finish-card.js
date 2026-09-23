@@ -1,14 +1,18 @@
 /**
- * The finish card: a shareable end-of-race summary drawn between the race and the controls.
+ * The finish card: a shareable end-of-race summary drawn immediately under lane B, so the
+ * player sees it inside the viewport at the instant a race ends (NEW-B1). race.js scrolls
+ * the card and lane B into view together on finish.
  *
  * When both lanes finish, the card shows:
  *  - Winner, margin, one-line why ("aisle-first spent 3:29 seated vs 5:10").
  *  - Aircraft, load, compliance, families, seed on a small facts line.
  *  - "Copy link" button that writes the current URL (with every knob) to the clipboard.
- *  - Personal-best line: "PB for this setup: 4:52 · new PB!" when improved.
+ *  - Personal-best line ("biggest win with Two doors: 3:19"); a "New PB" flag when the current
+ *    margin exceeds the stored one for this matchup (NEW-m1).
  *
- * Reading is intentionally cheap: main.js emits `prs:race-finished` with the payload, this module
- * subscribes to it, renders the card, and hides itself when the race restarts.
+ * The card no longer carries a second Restart button (NEW-n3). Restart lives in the persistent
+ * race-controls row above the card so a player who has just seen the result does not need to
+ * scroll or hunt for it.
  */
 
 import { formatClock, formatPercent } from './format.js';
@@ -43,7 +47,7 @@ function renderCard(card, store, payload) {
   const preset = payload.presetLabel || state.presetId;
   const modeVerb = state.mode === 'deplane' ? 'deplaned' : 'boarded';
   const why = payload.whyLine || '';
-  const pbResult = PB_STORE.recordFinish(state, payload.winnerLane, winnerSeconds);
+  const pbResult = PB_STORE.recordFinish(state, payload.winnerLane, margin);
 
   card.innerHTML = '';
   card.hidden = false;
@@ -75,28 +79,27 @@ function renderCard(card, store, payload) {
   copyButton.addEventListener('click', () => copyLink(copyButton));
   actions.appendChild(copyButton);
 
-  const shareButton = document.createElement('button');
-  shareButton.type = 'button';
-  shareButton.textContent = 'Restart';
-  shareButton.addEventListener('click', () => {
-    window.dispatchEvent(new CustomEvent('prs:request-restart'));
-  });
-  actions.appendChild(shareButton);
-
   card.appendChild(actions);
 
   const pb = document.createElement('div');
   pb.className = 'pb';
-  if (pbResult.improved && pbResult.previous) {
-    pb.classList.add('new');
-    pb.textContent = `New PB · was ${formatClock(pbResult.previous.seconds)}`;
-  } else if (pbResult.improved) {
-    pb.classList.add('new');
-    pb.textContent = 'New PB for this setup';
-  } else if (pbResult.best) {
-    pb.textContent = `PB for this setup: ${formatClock(pbResult.best.seconds)}`;
-  }
+  pb.textContent = pbLine(pbResult, winnerLabel);
+  if (pbResult.improved && pbResult.previous) pb.classList.add('new');
+  else if (pbResult.improved) pb.classList.add('new');
   card.appendChild(pb);
+}
+
+function pbLine(pbResult, winnerLabel) {
+  if (pbResult.improved && pbResult.previous) {
+    return `New PB · biggest win with ${winnerLabel}: ${formatClock(pbResult.best.marginSeconds)} (was ${formatClock(pbResult.previous.marginSeconds)})`;
+  }
+  if (pbResult.improved) {
+    return `New PB · biggest win with ${winnerLabel}: ${formatClock(pbResult.best.marginSeconds)}`;
+  }
+  if (pbResult.best) {
+    return `Biggest win with ${winnerLabel}: ${formatClock(pbResult.best.marginSeconds)}`;
+  }
+  return '';
 }
 
 function copyLink(button) {

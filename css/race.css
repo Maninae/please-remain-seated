@@ -159,6 +159,38 @@
   color: var(--ink-muted);
   font-size: 12px;
   margin: 0;
+  min-height: 1.2em;
+}
+.cabin-card[data-lane="b"] .race-legend {
+  /* Present but non-informative under lane B so both cards keep the same height. When the heat
+   * view is on, this same slot carries the heat caption (see .heat-caption). Screen readers are
+   * told to skip via aria-hidden="true" in index.html. */
+  visibility: hidden;
+}
+.cabin-card[data-lane="b"] .race-legend.heat-caption { visibility: visible; }
+
+.race-legend.heat-caption {
+  gap: 6px 10px;
+  color: var(--ink-soft);
+}
+.race-legend.heat-caption .swatch { display: none; }
+.race-legend.heat-caption .heat-ramp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.race-legend.heat-caption .heat-ramp .bar {
+  width: 80px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #f0e4d2 0%, #c99f5a 50%, #382507 100%);
+  display: inline-block;
+}
+.race-legend.heat-caption .heat-ramp .end { color: var(--ink-muted); font-size: 11px; }
+.race-legend.heat-caption .heat-caption-text {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
 }
 .race-legend .swatch {
   display: inline-flex;
@@ -174,9 +206,23 @@
   flex: 0 0 auto;
 }
 .race-legend .swatch.moving  { color: var(--moving); }
-.race-legend .swatch.blocked { color: var(--moving); }
+.race-legend .swatch.blocked { color: var(--blocked); }
 .race-legend .swatch.blocked::before { background: transparent; border: 1.5px solid currentColor; }
-.race-legend .swatch.bag     { color: var(--bag); }
+.race-legend .swatch.bag { color: var(--blocked); }
+.race-legend .swatch.bag::before {
+  background: transparent;
+  border: 1.5px solid currentColor;
+  position: relative;
+}
+.race-legend .swatch.bag::after {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 1px;
+  background: var(--bag);
+  display: inline-block;
+  margin-left: -8px;
+  align-self: center;
+}
 .race-legend .swatch.seated  { color: #a9a193; }
 
 .follow-line {
@@ -187,6 +233,20 @@
   margin: 0;
 }
 .follow-line.stable { color: var(--ink); font-weight: 500; }
+
+.live-gap {
+  padding: 0 4px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 1.2em;
+  margin: 0;
+}
+.live-gap:empty { display: none; }
+
+/* Suppress the door-status line the moment it goes empty so the header layout stops carrying an
+ * invisible line that reads as a permanent gap in the card once the door has opened. */
+.card-header .door-status:empty { display: none; }
 
 /* Phone: two cabins side by side, vertical, each half width. Keep the legend compact but visible;
    B3 in the critic pass was `display: none` here, which stranded a phone visitor with no key. */
@@ -206,16 +266,91 @@
   .card-header .clock-block { justify-self: start; align-items: flex-start; }
   .card-header .clock { font-size: 36px; }
 
-  /* Compact legend at phone width: one line, wrap allowed, shown under lane A only. */
+  /* Compact legend at phone width: one line, wrap allowed. Lane B keeps a hidden placeholder
+   * so both card heights stay equal. */
   .race-legend {
     font-size: 11px;
     gap: 4px 10px;
     padding: 2px 2px 0;
   }
-  .cabin-card[data-lane="b"] .race-legend { display: none; }
+  .cabin-card[data-lane="b"] .race-legend {
+    visibility: hidden;
+    height: 1.2em;
+    overflow: hidden;
+  }
+  .cabin-card[data-lane="b"] .race-legend.heat-caption {
+    visibility: visible;
+    height: auto;
+    overflow: visible;
+  }
 }
 
-/* Control bar */
+/* Race-controls row: sits directly under the finish-card slot so Restart, speed, seed, heat
+ * toggle, and chime are always visible when a race is running or has just finished. NEW-M3
+ * moved these out of the deep-below-fold controls block. */
+.race-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: var(--gap-s);
+  padding: 8px 4px;
+}
+
+.race-controls .spacer { flex: 1 1 auto; }
+.race-controls button,
+.race-controls .segmented .seg {
+  min-height: var(--tap);
+}
+.race-controls #btn-race {
+  min-width: 96px;
+  padding: 10px 20px;
+  font-size: 14px;
+}
+.race-controls .segmented .seg {
+  padding: 10px 16px;
+  font-size: 13px;
+}
+.race-controls .seed-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.race-controls .seed-row button {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.race-controls .seed-row input[type="text"] {
+  width: 14ch;
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.race-controls .heat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 13px;
+  cursor: pointer;
+}
+.race-controls .heat-toggle:hover { border-color: var(--ink); color: var(--ink); }
+.race-controls .heat-toggle.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.race-controls .heat-toggle::before {
+  content: "";
+  width: 44px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+  background: linear-gradient(90deg, #f0e4d2 0%, #c99f5a 50%, #382507 100%);
+  flex: 0 0 auto;
+}
+
+/* Control bar (knobs only, below the race controls). */
 
 .controls {
   background: var(--paper);

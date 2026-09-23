@@ -199,6 +199,139 @@ test('finish card and time-split shared scale (B2, M11)', async (t) => {
   }
 });
 
+test('finish scroll and heat view (NEW-B1 and worst-seats)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    // Test at 1280x800 exactly — this is the viewport the critic caught the below-fold bug at.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    const url = `${BASE_URL}/index.html?mode=deplane&a=free-for-all&b=two-doors&seed=r2-b1&preset=a320&speed=60`;
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForSelector('[data-canvas="a"]');
+    await page.click('[data-speed="60"]');
+
+    await page.waitForFunction(() => document.querySelectorAll('.cabin-card.winner').length >= 1, { timeout: 60000 });
+    await page.waitForTimeout(3500);
+
+    // NEW-B1: the finish card must be fully in view at 1280x800 after finish scroll.
+    const cardVisibility = await page.evaluate(() => {
+      const card = document.getElementById('finish-card');
+      if (!card || card.hidden) return { visible: false, pctVisible: 0 };
+      const rect = card.getBoundingClientRect();
+      const clamp = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+      return { visible: rect.bottom > 0 && rect.top < window.innerHeight, pctVisible: (clamp / rect.height) * 100 };
+    });
+    assert.ok(cardVisibility.visible, 'finish card should be in the 1280x800 viewport after finish');
+    assert.ok(cardVisibility.pctVisible >= 95, `finish card should be at least 95% visible, got ${Math.round(cardVisibility.pctVisible)}%`);
+
+    // Heat view: after finish, the winning cabin canvas must be filled with heat colors on its
+    // seats. We assert the seat fills sit on the ochre ramp (not the neutral seatFill hex).
+    // Reading a canvas 2d pixel through page.evaluate is safe here (same origin).
+    const heatSample = await page.evaluate(() => {
+      const canvas = document.querySelector('[data-canvas="b"]');
+      const ctx = canvas.getContext('2d');
+      // Sample a stripe of pixels along the winning cabin's canvas at ~1/3 down. Any pixel
+      // whose r channel is well above g+b is on the paper/ochre axis (warm), not the aisle blue.
+      const width = canvas.width;
+      const height = canvas.height;
+      const strip = ctx.getImageData(0, Math.floor(height * 0.35), width, 1);
+      const pixels = strip.data;
+      let warmCount = 0;
+      let paperCount = 0;
+      const warmHexes = new Set();
+      for (let i = 0; i < pixels.length; i += 4) {
+        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+        if (r > g && g > b && r - b > 40) warmCount += 1;
+        if (r >= 240 && g >= 235 && b >= 220) paperCount += 1;
+        if (warmHexes.size < 24) warmHexes.add(`${r},${g},${b}`);
+      }
+      return { warmCount, paperCount, sampleHexes: [...warmHexes] };
+    });
+    assert.ok(heatSample.warmCount > 20, `heat view should paint many warm pixels on the winning cabin, got ${heatSample.warmCount}`);
+
+    // The heat legend caption is visible on both cabins.
+    const captions = await page.evaluate(() => {
+      const a = document.querySelector('.cabin-card[data-lane="a"] .race-legend');
+      const b = document.querySelector('.cabin-card[data-lane="b"] .race-legend');
+      return {
+        a: a && a.classList.contains('heat-caption') ? a.textContent : '',
+        b: b && b.classList.contains('heat-caption') ? b.textContent : '',
+      };
+    });
+    assert.ok(/Worst/.test(captions.a), `lane A heat caption should say Worst ...: "${captions.a}"`);
+    assert.ok(/Worst/.test(captions.b), `lane B heat caption should say Worst ...: "${captions.b}"`);
+
+    // Heat toggle: clicking it removes the heat and re-paints seats with the seatFill neutral.
+    await page.click('#btn-heat-toggle');
+    await page.waitForTimeout(400);
+    const heatOffSample = await page.evaluate(() => {
+      const canvas = document.querySelector('[data-canvas="b"]');
+      const ctx = canvas.getContext('2d');
+      const strip = ctx.getImageData(0, Math.floor(canvas.height * 0.35), canvas.width, 1);
+      const pixels = strip.data;
+      let ochreCount = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+        if (r > g && g > b && r - b > 60 && r < 230) ochreCount += 1;
+      }
+      return ochreCount;
+    });
+    assert.ok(heatOffSample < heatSample.warmCount * 0.6, `heat off should have far fewer ochre pixels (${heatOffSample} vs ${heatSample.warmCount})`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('moving and blocked passengers use different colours (NEW-M1)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    // Import the theme module through the page so the values are the actual production build.
+    await page.goto(`${BASE_URL}/index.html`, { waitUntil: 'load' });
+    const theme = await page.evaluate(async () => {
+      const mod = await import('/js/render/theme.js');
+      return { moving: mod.THEME.moving, blocked: mod.THEME.blocked, bag: mod.THEME.bag };
+    });
+    assert.ok(theme.moving, 'THEME.moving must be defined');
+    assert.ok(theme.blocked, 'THEME.blocked must be defined');
+    assert.notEqual(theme.moving.toLowerCase(), theme.blocked.toLowerCase(),
+      `NEW-M1: THEME.moving (${theme.moving}) and THEME.blocked (${theme.blocked}) must differ`);
+    // Blocked must be an ink-gray, not a green. Check it is far enough from the moving hex.
+    const rgbDiff = colorDistance(theme.moving, theme.blocked);
+    assert.ok(rgbDiff > 60, `blocked hue must be visibly distinct from moving, got rgb distance ${rgbDiff.toFixed(1)}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+function colorDistance(a, b) {
+  const parse = (hex) => {
+    const h = hex.replace('#', '');
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  };
+  const [ra, ga, ba] = parse(a);
+  const [rb, gb, bb] = parse(b);
+  return Math.sqrt((ra - rb) ** 2 + (ga - gb) ** 2 + (ba - bb) ** 2);
+}
+
+test('og image is generated (NEW-B2)', async (t) => {
+  const { statSync } = await import('node:fs');
+  try {
+    const stat = statSync(path.resolve('media/og.png'));
+    assert.ok(stat.size > 5000, `media/og.png should exist and be >5KB, got ${stat.size}`);
+  } catch (error) {
+    t.diagnostic('media/og.png missing — run `npm run og`');
+    assert.fail('media/og.png is required for the og:image tag (NEW-B2)');
+  }
+});
+
 function nonBenignError(message) {
   if (/favicon/i.test(message)) return false;
   if (/net::ERR_FAILED/i.test(message) && /media\/og\.png/i.test(message)) return false;

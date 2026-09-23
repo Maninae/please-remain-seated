@@ -39,32 +39,39 @@ js/engine/                    headless, deterministic per seed. No DOM, no Math.
   strategies/open-seating.js    the open-seating picker: passengers choose their own seat, not a queue order
 
 js/render/                    canvas + SVG drawing. Reads state, never mutates it.
-  theme.js                       color and type tokens shared with css/base.css
-  cabin-layout.js                pure geometry: fuselage bounds, seat rects, bin strips, door gaps
-  cabin-view.js                  canvas cabin renderer, any layout and aisle count, hitTest()
-  charts.js                      code-drawn SVG: the strip chart and the time-split bar
+  theme.js                       colour + type tokens (mirrors css/base.css) plus the heat-view ramp
+  cabin-layout.js                pure geometry: fuselage bounds, seat rects, door gaps, row labels
+  cabin-layout-bins.js           the bin-strip geometry pass, split out of cabin-layout.js
+  cabin-view.js                  canvas cabin renderer, any layout and aisle count, hitTest(), setHeat()
+  charts.js                      barrel: re-exports renderStrips and renderTimeSplit
+  charts-strips.js               strip chart: dots + p10-p90 band + median tick + finding title
+  charts-time-split.js           stacked-bar time-split renderer with a shared scale
+  charts-svg-dom.js              the small SVG DOM shim both charts modules share
   mock-state.js                  synthetic sim state for visual mocks, no engine dependency
 
 js/ui/                        DOM, driven by the store.
   store.js                       tiny observable store (state / update / subscribe)
-  race.js                        the race: two sims, lockstep stepping, finish detection, follow-a-passenger
+  race.js                        orchestrator: two sims, lockstep stepping, DOM wiring
+  race-follow.js                 follow-a-passenger + hover tooltip + live-gap slot
+  race-finish.js                 finish detection, result-card scroll, worst-seats heat view, heat toggle
   race-loop.js                   requestAnimationFrame stepping at the chosen speed multiplier
   race-sims.js                   builds the two race sims from a store snapshot
-  race-helpers.js                pure helpers for race.js (orientation, follow line, hit radius)
+  race-helpers.js                orientation, lane-node lookup, hit-test radius
   snapshot.js                    annotates state for the renderer (the followed id) without mutating it
-  controls.js                    every input widget, plus keyboard shortcuts
+  controls.js                    every input widget, plus keyboard shortcuts and the bag-slider normalizer
   sim-config.js                  turns store state into engine cabinOverrides / passengerOverrides
   compare.js                     "run it N times": fires every strategy, draws the strips, computes the finding sentence
   compare-pool.js                worker pool sized to navigator.hardwareConcurrency
   time-split.js                  the two time-split bars, drawn on one shared scale
-  finish-card.js                 shareable end-of-race summary: winner, margin, why, copy-link
-  personal-best.js               best time per (mode, preset, strategy pair) in localStorage
+  finish-card.js                 shareable end-of-race summary: winner, margin, why, copy-link, PB
+  personal-best.js               best MARGIN per (mode, preset, winner-vs-loser, key knobs) in localStorage
   explainer.js                   "how this works" copy
   sound.js                       seatbelt-chime WebAudio, off by default
-  format.js                      shared formatters (clock, percent, follow-line text)
+  format.js                      shared formatters (clock, percent, finding sentence)
   canvas-sizing.js               cabin canvas height derived from the layout, not a fixed constant
 
 tools/simulate.mjs            CLI: headless Monte Carlo table (median / p10 / p90 / throughput per strategy)
+tools/og-image.mjs            Playwright screenshotter: writes media/og.png from a finished race (npm run og)
 
 tests/unit/*.test.js          node --test: engine invariants + the calibration gates
 tests/e2e/shot.js             desktop + phone screenshot capture, starts the dev server if needed

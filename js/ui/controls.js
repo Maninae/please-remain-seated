@@ -137,29 +137,67 @@ export function mountControls({ store, sound, race }) {
   }
 
   function bindBagSliders() {
+    // Fix for NEW-M5: pin the dragged slider at its exact value, spread the deficit or surplus
+    // across the OTHER two proportionally, and drive every label from the same normalized value
+    // its slider now sits at. That means the label under the thumb matches the thumb, all three
+    // sum to 1.00 by construction, and dragging bag2 to 0.9 leaves it at 0.9 (not 0.55).
     const inputs = ['bag0-slider', 'bag1-slider', 'bag2-slider'].map((id) => document.getElementById(id));
     const values = ['bag0-value', 'bag1-value', 'bag2-value'].map((id) => document.getElementById(id));
     const keys = ['bagP0', 'bagP1', 'bagP2'];
+
+    function updateFrom(pinnedIndex) {
+      const pinned = clampUnit(Number(inputs[pinnedIndex].value));
+      const remaining = Math.max(0, 1 - pinned);
+      const others = [0, 1, 2].filter((i) => i !== pinnedIndex);
+      const currentOthers = others.map((i) => clampUnit(Number(inputs[i].value)));
+      const otherSum = currentOthers[0] + currentOthers[1];
+      let redistributed;
+      if (otherSum > 1e-6) {
+        // Preserve the existing ratio between the two non-dragged sliders.
+        redistributed = currentOthers.map((v) => (v / otherSum) * remaining);
+      } else {
+        // Both others were zero; split the remaining probability evenly.
+        redistributed = [remaining / 2, remaining / 2];
+      }
+      const result = [0, 0, 0];
+      result[pinnedIndex] = pinned;
+      result[others[0]] = redistributed[0];
+      result[others[1]] = redistributed[1];
+      return result;
+    }
+
+    function applyValues(nextValues) {
+      for (let i = 0; i < inputs.length; i += 1) {
+        if (!inputs[i]) continue;
+        inputs[i].value = String(nextValues[i]);
+        if (values[i]) values[i].textContent = formatPercent(nextValues[i]);
+      }
+    }
+
     for (let i = 0; i < inputs.length; i += 1) {
       const slider = inputs[i];
       if (!slider) continue;
+      const pinnedIndex = i;
       slider.value = store.state()[keys[i]];
       if (values[i]) values[i].textContent = formatPercent(Number(slider.value));
+
+      // Drag preview: update all three labels live so what the user sees under every thumb
+      // matches what the store will hold when they let go. No store write here.
       slider.addEventListener('input', () => {
-        if (values[i]) values[i].textContent = formatPercent(Number(slider.value));
+        const next = updateFrom(pinnedIndex);
+        applyValues(next);
       });
       slider.addEventListener('change', () => {
-        const raw = inputs.map((input, index) => Math.max(0, Number(input.value)));
-        const sum = raw.reduce((total, value) => total + value, 0);
-        const normalized = sum > 0 ? raw.map((value) => value / sum) : [0.2, 0.6, 0.2];
-        // Reflect normalized values in the sliders and store.
-        for (let j = 0; j < inputs.length; j += 1) {
-          inputs[j].value = String(normalized[j]);
-          if (values[j]) values[j].textContent = formatPercent(normalized[j]);
-        }
-        store.update({ bagP0: normalized[0], bagP1: normalized[1], bagP2: normalized[2] });
+        const next = updateFrom(pinnedIndex);
+        applyValues(next);
+        store.update({ bagP0: next[0], bagP1: next[1], bagP2: next[2] });
       });
     }
+  }
+
+  function clampUnit(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
   }
 
   function bindSoundToggle() {

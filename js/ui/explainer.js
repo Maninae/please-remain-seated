@@ -10,8 +10,12 @@ export function mountExplainer({ store }) {
   store.subscribe(render);
 
   function render(state) {
+    // Fix for NEW-M4: the prior copy said "prep timer runs from door-open", which is the opposite
+    // of what the engine does. `t` counts from seatbelt-sign-off, and prep + row exits + bag
+    // retrieval all proceed during the staging window before the door opens. State the model
+    // truthfully.
     const modeLine = state.mode === 'deplane'
-      ? 'Deplaning today: prep timer runs from door-open, then anyone READY can stand if their row-mates are out and the aisle cell beside them is free.'
+      ? 'Deplaning today: the seatbelt sign goes off, people stand and prep, and rows start filling the aisle. The door opens after a short staging window. From there anyone still READY can stand if their row-mates are out and the aisle cell beside them is free.'
       : 'Boarding today: passengers arrive at the door on an exponential inter-arrival, walk aft, and stow at their bin (or the next one with space).';
     body.innerHTML = `
       <ul>
@@ -22,7 +26,7 @@ export function mountExplainer({ store }) {
         <li>Opening the rear door cuts deplaning time meaningfully: each half of the plane drains through its own exit instead of queueing behind the front door.</li>
         <li>Every strategy above rides the same physics. Change the sliders and the winner may flip; this is why airlines cannot promise a boarding time.</li>
       </ul>
-      <p>Spec: <a href="https://github.com/Maninae/please-remain-seated/blob/main/design/01-spec.md" target="_blank" rel="noopener">design/01-spec.md</a> · Research: <a href="https://github.com/Maninae/please-remain-seated/blob/main/design/02-research.md" target="_blank" rel="noopener">design/02-research.md</a></p>
+      <p>Spec: <a href="https://github.com/Maninae/please-remain-seated/blob/main/design/01-spec.md" target="_blank" rel="noopener">design/01-spec.md</a> &middot; Research: <a href="https://github.com/Maninae/please-remain-seated/blob/main/design/02-research.md" target="_blank" rel="noopener">design/02-research.md</a></p>
     `;
   }
 }
