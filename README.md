@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="media/og.png" alt="Two cabins racing: free-for-all deplaning against aisle-first, same passengers and seed" width="820">
+</p>
+
 # Please Remain Seated
 
 **Two cabins, the same 180 passengers, two exit orders. Race them and watch where the time goes.**
@@ -11,8 +15,6 @@
 ---
 
 An agent-based simulator of deplaning and boarding a plane. Every passenger is a person with a seat, some number of bags, a walking speed, and a patience for waiting their turn. The aisle is a single-lane road, one cell wide, no passing. A passenger digging a roller bag out of the overhead bin is a stopped car in that lane, and nothing behind them moves until they're done. That's the whole thesis, and the hero of the page is a race that makes it visible: two cabins, the same passengers, the same seed, two different exit or boarding orders, side by side.
-
-![Two cabins racing: free-for-all deplaning against aisle-first, same passengers and seed](media/og.png)
 
 ## The strategies
 
