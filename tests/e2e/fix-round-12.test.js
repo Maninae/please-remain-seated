@@ -233,11 +233,19 @@ async function runCompareAndMeasure(browser, preset, { width = 1280, height = 90
         x: Number(line.getAttribute('x1')),
         seconds: Number(line.getAttribute('data-median-seconds')),
       })).filter((m) => Number.isFinite(m.x) && Number.isFinite(m.seconds));
-      const offScale = Array.from(svg.querySelectorAll('text[data-row-off-scale]')).map((t) => ({
-        rowId: t.getAttribute('data-row-off-scale') || '',
-        text: (t.textContent || '').trim(),
-        seconds: Number(t.getAttribute('data-median-seconds')),
-      }));
+      const offScale = Array.from(svg.querySelectorAll('text[data-row-off-scale]')).map((t) => {
+        const bbox = t.getBBox();
+        return {
+          rowId: t.getAttribute('data-row-off-scale') || '',
+          text: (t.textContent || '').trim(),
+          clock: t.getAttribute('data-off-scale-clock') || '',
+          seconds: Number(t.getAttribute('data-median-seconds')),
+          bboxLeft: bbox.x,
+          bboxRight: bbox.x + bbox.width,
+          bboxTop: bbox.y,
+          bboxBottom: bbox.y + bbox.height,
+        };
+      });
       panels.push({ svgWidth, chartX0, chartX1, plotBandPx, medians, offScale });
     }
     return { panels };
@@ -299,14 +307,48 @@ test('round-14: off-scale rows draw as broken bars with the true value printed, 
     for (const panel of panels) {
       for (const off of panel.offScale) {
         sawOffScale = true;
-        // The gutter label must carry a real clock string, never blank, never "off scale".
-        assert.match(off.text, /^\d{1,2}:\d{2}$/,
-          `off-scale gutter label for ${off.rowId} should print a clock, got "${off.text}"`);
+        // The clock attribute must carry a real M:SS value, and the visible text pairs it
+        // with " (off scale)" (desktop) or a dagger glyph (phone). Never blank.
+        assert.match(off.clock, /^\d{1,2}:\d{2}$/,
+          `off-scale row ${off.rowId} clock attribute should be M:SS, got "${off.clock}"`);
         assert.ok(Number.isFinite(off.seconds) && off.seconds > 0,
           `off-scale gutter for ${off.rowId} must expose its true median in seconds, got ${off.seconds}`);
       }
     }
     assert.ok(sawOffScale, 'a320 board compare should have at least one off-scale row drawn as a broken bar');
+  } finally { await browser.close(); }
+});
+
+// Round-14 lead follow-up: the printed value of an off-scale row must be fully inside the
+// SVG viewBox at both desktop and phone widths, and must carry a real M:SS clock (not a
+// blank or a "25:" fragment). Runs against both a320 (three off-scale rows, wide labels)
+// and b717 (one off-scale row on the tightest plot band the presets carry).
+test('round-14: off-scale value text is never clipped by the SVG on a320 or b717 at 1280 or 400 px', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    for (const preset of ['a320', 'b717']) {
+      for (const size of [{ width: 1280, height: 900 }, { width: 400, height: 800 }]) {
+        const { panels } = await runCompareAndMeasure(browser, preset, size);
+        let saw = 0;
+        for (const panel of panels) {
+          for (const off of panel.offScale) {
+            saw += 1;
+            assert.match(off.clock, /^\d{1,2}:\d{2}$/,
+              `${preset} @ ${size.width}: off-scale row ${off.rowId} clock must be M:SS, got "${off.clock}" `
+              + `(rendered as "${off.text}")`);
+            assert.ok(off.bboxLeft >= 0,
+              `${preset} @ ${size.width}: off-scale text "${off.text}" for ${off.rowId} left edge ${off.bboxLeft.toFixed(2)} `
+              + `must be >= 0 (inside svg viewBox)`);
+            assert.ok(off.bboxRight <= panel.svgWidth + 1e-6,
+              `${preset} @ ${size.width}: off-scale text "${off.text}" for ${off.rowId} right edge ${off.bboxRight.toFixed(2)} `
+              + `must be <= svgWidth ${panel.svgWidth} (never clipped)`);
+          }
+        }
+        assert.ok(saw >= 1,
+          `${preset} @ ${size.width}: expected at least one off-scale row in the board compare, got ${saw}`);
+      }
+    }
   } finally { await browser.close(); }
 });
 

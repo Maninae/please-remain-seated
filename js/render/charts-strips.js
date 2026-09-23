@@ -32,7 +32,15 @@ import { computeStripsAxisPolicy } from './strips-axis-policy.js';
 // Round-05: bumped from 130 -> 200 px so the wider airline labels ("Southwest (2026 assigned
 // seats)") fit inside the label gutter without clipping.
 const STRIPS_PADDING_LEFT = 200;
-const STRIPS_PADDING_RIGHT = 24;
+const STRIPS_PADDING_RIGHT_DEFAULT = 24;
+// Round-14 lead follow-up: reserve a wider right gutter when any row draws as off-scale so
+// its printed value ("26:05 (off scale)" on desktop, "26:05†" on phone) fits fully inside
+// the SVG. Widths measured at STRIPS_LABEL_FONT_PX (12) with the Barlow / system fallback
+// stack in css/base.css: worst case is a wide "M:SS (off scale)" glyph run of ~110 px.
+// Phone width stays tight because the label gutter is already half the SVG at 400 px.
+const STRIPS_PADDING_RIGHT_OFF_SCALE_DESKTOP = 110;
+const STRIPS_PADDING_RIGHT_OFF_SCALE_PHONE = 44;
+const STRIPS_PHONE_WIDTH_THRESHOLD = 520;
 const STRIPS_PADDING_TOP = 46;
 const STRIPS_PADDING_BOTTOM = 22;
 const STRIPS_ROW_HEIGHT = 34;
@@ -66,8 +74,14 @@ export function renderStrips(host, series, options = {}) {
     'font-family': THEME.fontFamily,
   });
 
+  const isPhone = width < STRIPS_PHONE_WIDTH_THRESHOLD;
+  const hasOffScaleRows = rowsOffScale.size > 0;
+  const paddingRight = hasOffScaleRows
+    ? (isPhone ? STRIPS_PADDING_RIGHT_OFF_SCALE_PHONE : STRIPS_PADDING_RIGHT_OFF_SCALE_DESKTOP)
+    : STRIPS_PADDING_RIGHT_DEFAULT;
+
   const chartX0 = STRIPS_PADDING_LEFT;
-  const chartX1 = width - STRIPS_PADDING_RIGHT;
+  const chartX1 = width - paddingRight;
   const chartWidth = Math.max(1, chartX1 - chartX0);
   const scaleRange = Math.max(1, paddedMax - paddedMin);
   // projectSeconds does NOT clamp: callers who project an off-scale value get an x outside
@@ -116,6 +130,8 @@ export function renderStrips(host, series, options = {}) {
         rowId: s.id,
         chartX0, chartX1, rowY, median,
         highlight: !!s.highlight,
+        isPhone,
+        svgWidth: width,
       });
       continue;
     }
@@ -198,10 +214,15 @@ function drawBandBreakTick(svg, x, rowY, bandHeight) {
   });
 }
 
-function drawOffScaleRow(svg, { rowId, chartX0, chartX1, rowY, median, highlight }) {
+function drawOffScaleRow(svg, { rowId, chartX0, chartX1, rowY, median, highlight, isPhone, svgWidth }) {
   // Broken bar terminating at the right edge, with a zigzag break mark and the true value
   // printed in the right gutter. Copied treatment from js/ui/rankings/rankings-chart.js
   // so the two charts agree on how an off-scale row reads. Never clamp a median to the cap.
+  //
+  // Label geometry (round-14 lead follow-up): desktop prints "M:SS (off scale)" and phone
+  // prints "M:SSdagger" (short glyph to fit the narrow right gutter). The label is anchored
+  // by its RIGHT edge at svgWidth - 4, so it can never extend past the SVG viewBox and is
+  // therefore never clipped, regardless of the exact glyph width.
   const bandHeight = STRIPS_ROW_HEIGHT * STRIPS_BAND_HEIGHT_FRACTION;
   const bandStartX = chartX0;
   const bandEndX = chartX1;
@@ -224,16 +245,19 @@ function drawOffScaleRow(svg, { rowId, chartX0, chartX1, rowY, median, highlight
     path.setAttribute('stroke-opacity', '0.55');
     svg.appendChild(path);
   }
+  const clock = formatOffScaleClock(median);
+  const labelText = isPhone ? `${clock}†` : `${clock} (off scale)`;
   const label = appendText(svg, {
-    x: chartX1 + 6, y: rowY + STRIPS_LABEL_FONT_PX / 3,
+    x: svgWidth - 4, y: rowY + STRIPS_LABEL_FONT_PX / 3,
     'font-size': STRIPS_LABEL_FONT_PX,
-    'text-anchor': 'start',
+    'text-anchor': 'end',
     fill: highlight ? THEME.moving : THEME.ink,
     'font-weight': 600,
     'font-variant-numeric': 'tabular-nums',
-  }, formatOffScaleClock(median));
+  }, labelText);
   label.setAttribute('data-row-off-scale', rowId || '');
   label.setAttribute('data-median-seconds', String(median));
+  label.setAttribute('data-off-scale-clock', clock);
 }
 
 function drawAxisEdgeNotes(svg, { chartX0, chartX1, axisY, paddedMin, belowFloorTotal, aboveCapTotal }) {
