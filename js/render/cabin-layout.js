@@ -1,13 +1,13 @@
 /**
- * Pure geometry for the cabin renderer. Given a cabin (see js/engine/cabin.js: uses layout, rows,
- * aisleCellsPerRow, frontGalleyCells, rearGalleyCells, rearDoor, binRowsPerBin, cellsPerAisle) plus canvas
- * dimensions and orientation, computes fuselage bounds, aisle lanes, seat rectangles, bin strips,
- * door gaps, row-number label positions, and helpers to map (row, col) or (aisleIndex, aisleCell)
- * to pixels.
+ * Pure geometry for the cabin renderer. Given a cabin (see js/engine/cabin.js: carries a
+ * `sections` list plus totals like cellsPerAisle, frontGalleyCells, rearDoor) plus canvas
+ * dimensions and orientation, produces the fuselage rectangle, aisle lanes, seat rectangles,
+ * bin strips, door gaps, row-number labels, section dividers, and helpers to map (row, col) or
+ * (aisleIndex, aisleCell) to pixels.
  *
- * No canvas, no DOM. Everything is a rectangle plus a set of centre-point lookups, so the
- * canvas view is a straight iteration over the returned arrays and the same geometry is unit-
- * testable and works in either orientation.
+ * The section-aware pieces (aisle lanes, seats, bin strips, row labels, dividers) live in
+ * cabin-layout-sections.js so this file stays a thin orchestrator. The bin-strip geometry pass
+ * lives in cabin-layout-bins.js.
  *
  * Orientation:
  *   horizontal: nose at the left. Long axis = X (rows). Cross axis = Y (blocks / aisles).
@@ -15,9 +15,20 @@
  *
  * Cross-cabin unit layout (in seat-widths, left to right when the plane's nose points left):
  *   outer-bin(0.35) | block0 seats | aisle0 | block1 seats | aisle1 | ... | outer-bin(0.35)
- * When a block is a middle block (not the first or last), a middle-bin strip splits it in half
- * (an odd middle-block seat goes to the left half, matching the engine contract).
+ * A middle block splits in half around its middle-bin strip (an odd middle seat goes left).
+ *
+ * Sectioned cabins share one fuselage cross span. Each section's own cross units are scaled to
+ * fill that span, so a first-class 2-2 row draws with visibly wider seats than an economy 3-3
+ * row on the same plane. Along the long axis, each row occupies its section's own
+ * aisleCellsPerRow cells (a 44 in lie-flat business row is longer than a 31 in economy row).
  */
+
+import {
+  computeSectionCrossLayouts, computeSectionLongExtents, computeSectionDividers,
+  fuselageCrossUnitsFor, foreSectionLabel,
+  buildAisleLanes, buildSeats, buildBinStripsAcrossSections,
+  buildRowLabels, buildDividerLines,
+} from './cabin-layout-sections.js';
 
 // Cross-cabin widths, in seat units. Chosen to keep an aisle readable (matching the safety-card
 // look) while the bin strips stay thin and stay out of the way of the passenger dots.
@@ -28,12 +39,6 @@ const SEAT_UNIT = 1.0;
 
 // Padding around the whole cabin drawing (in canvas pixels, before dpr scaling).
 const CANVAS_MARGIN_PX = 14;
-
-// Seat rectangle fills this fraction of its cell; leaves a hairline gap so blocks read as blocks.
-const SEAT_FILL_FRACTION = 0.86;
-
-// Bin segment sizing constants live in cabin-layout-bins.js; the strip geometry pass lives there.
-import { computeBinStrips } from './cabin-layout-bins.js';
 
 // Door gap in the fuselage side wall, expressed in aisle cells.
 const DOOR_GAP_CELLS = 3;
@@ -51,16 +56,15 @@ const BAG_GLYPH_SIZE_FRACTION = 0.9;   // as a fraction of dot diameter
 // A row number label sits every this-many rows (5 => rows 5, 10, 15, ...).
 const ROW_LABEL_EVERY = 5;
 const ROW_LABEL_FONT_PX = 10;
-const ROW_LABEL_GUTTER_PX = 3;
 
-/** Sum of the block widths (total seat columns per row). */
+/** Sum of the block widths (total seat columns per row of that layout). */
 export function totalSeatColumns(layout) {
   let s = 0;
   for (let i = 0; i < layout.length; i += 1) s += layout[i];
   return s;
 }
 
-/** Total cross units for the cabin: outer bins, aisles, middle bins, and seat columns. */
+/** Total cross units for one layout: outer bins, aisles, middle bins, and seat columns. */
 export function crossUnitsForLayout(layout) {
   const seats = totalSeatColumns(layout);
   const aisles = Math.max(0, layout.length - 1);
@@ -75,22 +79,18 @@ function middleSplitAt(blockWidth) {
 }
 
 /**
- * Cross-cabin unit offset (left edge, in seat units) for every seat column and every aisle,
- * plus a list of bin-strip specs (one outer-left, one outer-right, one center per middle block).
- * This is orientation-agnostic; the caller then multiplies by crossUnitPx and adds the axis
- * offset for the chosen orientation.
+ * Cross-cabin unit offset for every seat column and every aisle in one section's layout, plus
+ * a list of bin-strip specs (one outer-left, one outer-right, one center per middle block).
+ * Orientation-agnostic; the caller multiplies by crossUnitPx and adds the section's scale.
  */
-function computeCrossOffsets(layout) {
+export function computeCrossOffsets(layout) {
   const totalCols = totalSeatColumns(layout);
   const columnLeftUnits = new Array(totalCols);
   const aisleCentreUnits = new Array(Math.max(0, layout.length - 1));
   const binSpecs = [];
-
   let u = 0;
-  // Outer bin left.
   binSpecs.push({ blockIndex: 0, side: 'outboard-left', leftUnits: u, widthUnits: OUTER_BIN_UNIT });
   u += OUTER_BIN_UNIT;
-
   let colAcc = 0;
   for (let b = 0; b < layout.length; b += 1) {
     if (b > 0) {
@@ -114,19 +114,14 @@ function computeCrossOffsets(layout) {
     }
     colAcc += wb;
   }
-
-  // Outer bin right.
   binSpecs.push({ blockIndex: layout.length - 1, side: 'outboard-right', leftUnits: u, widthUnits: OUTER_BIN_UNIT });
   u += OUTER_BIN_UNIT;
-
   return { columnLeftUnits, aisleCentreUnits, binSpecs, totalUnits: u };
 }
 
 /**
- * Given a cabin (needs .layout, .rows, .aisleCellsPerRow, .frontGalleyCells, .rearGalleyCells,
- * .rearDoor, .binRowsPerBin, .cellsPerAisle) plus canvas size and orientation, return everything
- * the canvas view needs to draw the cabin. All returned pixel coordinates are canvas-space
- * (top-left origin), pre-dpr; the canvas view multiplies by dpr for the actual draw.
+ * Compute all the drawing rectangles and lookups for one cabin at a given canvas size and
+ * orientation. Section-aware.
  */
 export function computeGeometry(cabin, canvasWidth, canvasHeight, orientation = 'horizontal') {
   const horizontal = orientation === 'horizontal';
@@ -136,106 +131,71 @@ export function computeGeometry(cabin, canvasWidth, canvasHeight, orientation = 
   const longSpanPx = Math.max(1, longAxisPx - 2 * CANVAS_MARGIN_PX);
   const crossSpanPx = Math.max(1, crossAxisPx - 2 * CANVAS_MARGIN_PX);
 
-  // Per-aisle cell count: this is the length of the aisle along the long axis. cabin.totalCells is
-  // the aggregate across every aisle in the generalized cabin, which is not what we want here.
-  const cellsPerAisle = cabin.cellsPerAisle != null
-    ? cabin.cellsPerAisle
-    : (cabin.totalCells / Math.max(1, (cabin.layout.length - 1)));
+  const sections = cabin.sections;
+  const cellsPerAisle = cabin.cellsPerAisle;
   const cellLongPx = longSpanPx / cellsPerAisle;
-  const rowLongPx = cellLongPx * cabin.aisleCellsPerRow;
 
-  const cross = computeCrossOffsets(cabin.layout);
-  const crossUnitPx = crossSpanPx / cross.totalUnits;
-  const seatUnitPx = crossUnitPx * SEAT_UNIT;
+  const fuselageUnits = fuselageCrossUnitsFor(sections);
+  const crossUnitPx = crossSpanPx / fuselageUnits;
+  const sectionLayouts = computeSectionCrossLayouts(sections, fuselageUnits);
+  const sectionExtents = computeSectionLongExtents(sections, cabin.frontGalleyCells);
+  const sectionDividers = computeSectionDividers(sections, cabin.frontGalleyCells);
+  const foreLabel = foreSectionLabel(sections);
 
-  const naturalDot = Math.min(rowLongPx, seatUnitPx) * DOT_RADIUS_FRACTION;
-  const dotRadiusPx = Math.max(DOT_RADIUS_MIN_PX, Math.min(DOT_RADIUS_MAX_PX, naturalDot));
-
-  // Convert cross units to canvas pixels along the cross axis (cross axis has its own margin).
+  // Convert seat units to canvas pixels along the cross axis (cross axis has its own margin).
   const crossPx = (units) => CANVAS_MARGIN_PX + units * crossUnitPx;
   // Convert cell index (0..cellsPerAisle) along the long axis to canvas pixels.
   const longPx = (cellIndex) => CANVAS_MARGIN_PX + cellIndex * cellLongPx;
+  const toXY = (long, cross) => (horizontal ? { x: long, y: cross } : { x: cross, y: long });
+  const rectFromBoundsShim = (longStart, longEnd, crossStart, crossEnd) =>
+    rectFromBounds(longStart, longEnd, crossStart, crossEnd, horizontal);
 
-  // Map cross+long into (x, y) for the current orientation.
-  const toXY = (long, cross) => horizontal ? { x: long, y: cross } : { x: cross, y: long };
+  // Dot radius from the smallest section's cell + seat unit, so dots stay visible in the
+  // densest section (economy at 31 in pitch, 3-3 seats).
+  let minSeatPx = Infinity;
+  for (const layout of sectionLayouts) {
+    const seatUnitPx = crossUnitPx * SEAT_UNIT * layout.unitsScale;
+    if (seatUnitPx < minSeatPx) minSeatPx = seatUnitPx;
+  }
+  const naturalDot = Math.min(cellLongPx, minSeatPx) * DOT_RADIUS_FRACTION;
+  const dotRadiusPx = Math.max(DOT_RADIUS_MIN_PX, Math.min(DOT_RADIUS_MAX_PX, naturalDot));
 
-  // Fuselage rectangle.
   const fuselageLongStart = longPx(0);
   const fuselageLongEnd = longPx(cellsPerAisle);
   const fuselageCrossStart = crossPx(0);
-  const fuselageCrossEnd = crossPx(cross.totalUnits);
-  const fuselageRect = rectFromBounds(fuselageLongStart, fuselageLongEnd, fuselageCrossStart, fuselageCrossEnd, horizontal);
+  const fuselageCrossEnd = crossPx(fuselageUnits);
+  const fuselageRect = rectFromBounds(
+    fuselageLongStart, fuselageLongEnd, fuselageCrossStart, fuselageCrossEnd, horizontal,
+  );
 
-  // Door gaps (one on each long side of the fuselage at each open door).
   const doorGaps = [];
   const doorCellsFront = { startCell: 0, endCell: Math.min(DOOR_GAP_CELLS, cabin.frontGalleyCells || DOOR_GAP_CELLS) };
-  pushDoorGaps(doorGaps, doorCellsFront, longPx, crossPx, cross.totalUnits, horizontal);
+  pushDoorGaps(doorGaps, doorCellsFront, longPx, crossPx, fuselageUnits, horizontal);
   if (cabin.rearDoor) {
     const aftStart = cellsPerAisle - Math.min(DOOR_GAP_CELLS, cabin.rearGalleyCells || DOOR_GAP_CELLS);
     const doorCellsAft = { startCell: aftStart, endCell: cellsPerAisle };
-    pushDoorGaps(doorGaps, doorCellsAft, longPx, crossPx, cross.totalUnits, horizontal);
+    pushDoorGaps(doorGaps, doorCellsAft, longPx, crossPx, fuselageUnits, horizontal);
   }
 
-  // Aisle lanes (one rect per aisle spanning the full long axis).
-  const aisles = [];
-  for (let a = 0; a < cross.aisleCentreUnits.length; a += 1) {
-    const centreUnits = cross.aisleCentreUnits[a];
-    const halfUnits = AISLE_UNIT / 2;
-    const laneCrossStart = crossPx(centreUnits - halfUnits);
-    const laneCrossEnd = crossPx(centreUnits + halfUnits);
-    aisles.push({
-      aisleIndex: a,
-      ...rectFromBounds(fuselageLongStart, fuselageLongEnd, laneCrossStart, laneCrossEnd, horizontal),
-    });
-  }
-
-  // Seat rectangles (one per (row, col)).
-  const seats = [];
-  const totalCols = cross.columnLeftUnits.length;
-  for (let row = 1; row <= cabin.rows; row += 1) {
-    const rowCellStart = cabin.frontGalleyCells + (row - 1) * cabin.aisleCellsPerRow;
-    const rowLongCentre = longPx(rowCellStart + cabin.aisleCellsPerRow / 2);
-    const seatLongHalf = (rowLongPx * SEAT_FILL_FRACTION) / 2;
-    for (let col = 0; col < totalCols; col += 1) {
-      const colCentreUnits = cross.columnLeftUnits[col] + SEAT_UNIT / 2;
-      const seatCrossCentre = crossPx(colCentreUnits);
-      const seatCrossHalf = (seatUnitPx * SEAT_FILL_FRACTION) / 2;
-      seats.push({
-        row,
-        col,
-        ...rectFromBounds(
-          rowLongCentre - seatLongHalf, rowLongCentre + seatLongHalf,
-          seatCrossCentre - seatCrossHalf, seatCrossCentre + seatCrossHalf,
-          horizontal,
-        ),
-      });
-    }
-  }
-
-  // Bin strips (segments of binRowsPerBin rows each, running counter across blocks).
-  const binStrips = computeBinStrips(
-    cabin,
-    cross.binSpecs,
-    {
-      rowLongPx, cellLongPx, crossUnitPx,
-      crossPx, longPx,
-    },
-    (longStart, longEnd, crossStart, crossEnd) =>
-      rectFromBounds(longStart, longEnd, crossStart, crossEnd, horizontal),
-  );
-
-  // Row-number labels (rows 5, 10, ... plus the last row, but only when the last row is far
-  // enough past the previous label that the two do not visually collide at narrow canvas widths).
-  const labelRows = [];
-  for (let row = ROW_LABEL_EVERY; row <= cabin.rows; row += ROW_LABEL_EVERY) labelRows.push(row);
-  const lastLabel = labelRows.length ? labelRows[labelRows.length - 1] : 0;
-  const minGapFromLast = Math.ceil(ROW_LABEL_EVERY / 2);   // 3 for the default every-5 spacing
-  if (cabin.rows > lastLabel && cabin.rows - lastLabel >= minGapFromLast) labelRows.push(cabin.rows);
-  const rowLabels = labelRows.map((row) => {
-    const rowCellStart = cabin.frontGalleyCells + (row - 1) * cabin.aisleCellsPerRow;
-    const rowLongCentre = longPx(rowCellStart + cabin.aisleCellsPerRow / 2);
-    const crossOffset = crossPx(cross.totalUnits) + ROW_LABEL_GUTTER_PX;
-    return { row, ...toXY(rowLongCentre, crossOffset) };
+  const aisles = buildAisleLanes({
+    cabin, sections, sectionLayouts, sectionExtents,
+    longPx, crossPx, rectFromBounds: rectFromBoundsShim,
+  });
+  const seats = buildSeats({
+    sections, sectionLayouts, sectionExtents,
+    cellLongPx, crossUnitPx, longPx, crossPx, rectFromBounds: rectFromBoundsShim,
+  });
+  const binStrips = buildBinStripsAcrossSections({
+    sections, sectionLayouts, sectionExtents,
+    cellLongPx, crossUnitPx, longPx, crossPx, rectFromBounds: rectFromBoundsShim,
+  });
+  const rowLabels = buildRowLabels({
+    cabin, sections, sectionExtents, fuselageUnits,
+    longPx, crossPx, toXY, rowLabelEvery: ROW_LABEL_EVERY,
+  });
+  const dividerLines = buildDividerLines({
+    dividers: sectionDividers, foreLabel,
+    fuselageCrossStart, fuselageCrossEnd, longPx, horizontal,
   });
 
   return {
@@ -246,48 +206,76 @@ export function computeGeometry(cabin, canvasWidth, canvasHeight, orientation = 
     longAxisPx,
     crossAxisPx,
     cellLongPx,
-    rowLongPx,
     crossUnitPx,
-    seatUnitPx,
     dotRadiusPx,
     fuselage: { ...fuselageRect, doorGaps },
     aisles,
     seats,
     binStrips,
+    sectionDividers: dividerLines,
     rowLabels,
     rowLabelFontPx: ROW_LABEL_FONT_PX,
     bagGlyphOffsetPx: dotRadiusPx * BAG_GLYPH_OFFSET_RADII,
     bagGlyphSizePx: dotRadiusPx * 2 * BAG_GLYPH_SIZE_FRACTION,
-    // The internal offsets so lookups do not have to recompute them.
-    crossOffsets: cross,
+    // Internals so lookups do not have to recompute them.
+    cabinInternal: cabin,
+    sectionsInternal: sections,
+    sectionLayoutsInternal: sectionLayouts,
+    sectionExtentsInternal: sectionExtents,
     cellLongPxInternal: cellLongPx,
     crossUnitPxInternal: crossUnitPx,
-    seatUnitPxInternal: seatUnitPx,
     horizontalInternal: horizontal,
-    cabinInternal: cabin,
   };
 }
 
-/** Centre of a seat rectangle for (row, col). Convenience for the passenger-dot pass. */
+/** Centre of a seat rectangle for (row, col). */
 export function seatCentre(geometry, row, col) {
-  const cross = geometry.crossOffsets;
-  const cellStart = geometry.cabinInternal.frontGalleyCells + (row - 1) * geometry.cabinInternal.aisleCellsPerRow;
-  const longCentre = CANVAS_MARGIN_PX + (cellStart + geometry.cabinInternal.aisleCellsPerRow / 2) * geometry.cellLongPxInternal;
-  const crossCentre = CANVAS_MARGIN_PX + (cross.columnLeftUnits[col] + SEAT_UNIT / 2) * geometry.crossUnitPxInternal;
-  return geometry.horizontalInternal ? { x: longCentre, y: crossCentre } : { x: crossCentre, y: longCentre };
+  const sections = geometry.sectionsInternal;
+  const layouts = geometry.sectionLayoutsInternal;
+  const extents = geometry.sectionExtentsInternal;
+  const sectionIndex = findSectionIndexForRow(sections, row);
+  const section = sections[sectionIndex];
+  const layout = layouts[sectionIndex];
+  const extent = extents[sectionIndex];
+  const localIndex = row - section.firstRow;
+  const rowLongCentre = CANVAS_MARGIN_PX
+    + (extent.firstCell + localIndex * section.aisleCellsPerRow + section.aisleCellsPerRow / 2)
+    * geometry.cellLongPxInternal;
+  const colCentreUnits = layout.crossOffsets.columnLeftUnits[col]
+    + (SEAT_UNIT * layout.unitsScale) / 2;
+  const crossCentre = CANVAS_MARGIN_PX + colCentreUnits * geometry.crossUnitPxInternal;
+  return geometry.horizontalInternal
+    ? { x: rowLongCentre, y: crossCentre } : { x: crossCentre, y: rowLongCentre };
 }
 
-/** Centre of the aisle cell (aisleIndex, cell) in canvas pixels. */
+/**
+ * Centre of the aisle cell (aisleIndex, cell) in canvas pixels. The cross position depends on
+ * which section the cell sits in (aisles shift a hair between sections with different block
+ * widths); galley cells attach to the fore-most or aft-most section as appropriate.
+ */
 export function aisleCellCentre(geometry, aisleIndex, cell) {
-  const cross = geometry.crossOffsets;
-  const centreUnits = cross.aisleCentreUnits[aisleIndex];
+  const cabin = geometry.cabinInternal;
+  const sections = geometry.sectionsInternal;
+  const layouts = geometry.sectionLayoutsInternal;
+  const extents = geometry.sectionExtentsInternal;
+  let sectionIndex = 0;
+  if (cell < cabin.frontGalleyCells) sectionIndex = 0;
+  else if (cell >= extents[extents.length - 1].afterCell) sectionIndex = sections.length - 1;
+  else {
+    for (let s = 0; s < extents.length; s += 1) {
+      if (cell < extents[s].afterCell) { sectionIndex = s; break; }
+    }
+  }
+  const layout = layouts[sectionIndex];
+  const centreUnits = layout.crossOffsets.aisleCentreUnits[aisleIndex];
   if (centreUnits === undefined) throw new Error(`aisleIndex out of range: ${aisleIndex}`);
   const longCentre = CANVAS_MARGIN_PX + (cell + 0.5) * geometry.cellLongPxInternal;
   const crossCentre = CANVAS_MARGIN_PX + centreUnits * geometry.crossUnitPxInternal;
-  return geometry.horizontalInternal ? { x: longCentre, y: crossCentre } : { x: crossCentre, y: longCentre };
+  return geometry.horizontalInternal
+    ? { x: longCentre, y: crossCentre } : { x: crossCentre, y: longCentre };
 }
 
-/** Nearest passenger rendered near (x, y), or null. Used for optional hit-testing in the UI. */
+/** Nearest passenger rendered near (x, y), or null. Used for hit-testing in the UI. */
 export function nearestPassenger(geometry, passengers, x, y, maxDistancePx = null) {
   const maxD = maxDistancePx == null ? geometry.dotRadiusPx * 2.2 : maxDistancePx;
   let best = null;
@@ -313,7 +301,14 @@ export function passengerPoint(geometry, passenger) {
   return seatCentre(geometry, passenger.row, passenger.col);
 }
 
-// ------ internals ------
+// -------------------- internals --------------------
+
+function findSectionIndexForRow(sections, row) {
+  for (let s = 0; s < sections.length; s += 1) {
+    if (row >= sections[s].firstRow && row <= sections[s].lastRow) return s;
+  }
+  return sections.length - 1;
+}
 
 function rectFromBounds(longStart, longEnd, crossStart, crossEnd, horizontal) {
   if (horizontal) {
@@ -327,7 +322,6 @@ function pushDoorGaps(gaps, cells, longPx, crossPx, crossTotalUnits, horizontal)
   const longEnd = longPx(cells.endCell);
   const crossNear = crossPx(0);
   const crossFar = crossPx(crossTotalUnits);
-  // A gap on the near side and one on the far side (both long-sides of the fuselage).
   if (horizontal) {
     gaps.push({ side: 'top', x1: longStart, x2: longEnd, y: crossNear });
     gaps.push({ side: 'bottom', x1: longStart, x2: longEnd, y: crossFar });
@@ -337,7 +331,6 @@ function pushDoorGaps(gaps, cells, longPx, crossPx, crossTotalUnits, horizontal)
   }
 }
 
-// Constants a test wants to see; nothing else uses them.
 export const LAYOUT_CONSTANTS = Object.freeze({
   AISLE_UNIT, OUTER_BIN_UNIT, MIDDLE_BIN_UNIT, SEAT_UNIT, CANVAS_MARGIN_PX,
   DOT_RADIUS_MAX_PX, DOT_RADIUS_MIN_PX, ROW_LABEL_EVERY,

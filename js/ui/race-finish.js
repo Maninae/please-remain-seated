@@ -174,6 +174,13 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
     const presetLabel = (CABIN_PRESET_BY_ID[state.presetId] || {}).label || state.presetId;
 
     const whyLine = composeWhyLine(winnerSim, loserSim, winnerLabel, loserLabel);
+    // Per-class means for the winner (multi-class cabins only). The finish card renders
+    // "First class off in 0:48, economy in 6:10" when this is non-empty. summary() is a fresh
+    // read (metrics ticked continuously so we already have every passenger's time-split), and
+    // byClass is one entry per class the population contains. `mode` rides along so the finish
+    // card can pick the right verb ("off" for deplane, "on" for board).
+    const winnerByClass = safeByClass(winnerSim);
+    const loserByClass = safeByClass(loserSim);
     lastFinishPayload = {
       winnerLane, loserLane,
       winnerLabel, loserLabel,
@@ -181,6 +188,9 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
       loserSeconds: laneFinishSeconds[loserLane],
       presetLabel,
       whyLine,
+      mode: store.state().mode,
+      winnerByClass,
+      loserByClass,
     };
     window.dispatchEvent(new CustomEvent('prs:race-finished', { detail: lastFinishPayload }));
   }
@@ -318,6 +328,20 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
     getLastFinishPayload: () => lastFinishPayload,
     updateProvisionalStatus,
   };
+}
+
+/**
+ * Sim-safe byClass reader. `sim.summary()` may throw or be missing on an incomplete build; the
+ * finish card treats an empty result the same as a single-class cabin (no extra line drawn).
+ */
+function safeByClass(sim) {
+  if (!sim || typeof sim.summary !== 'function') return null;
+  try {
+    const summary = sim.summary();
+    return summary && summary.byClass ? summary.byClass : null;
+  } catch (error) {
+    return null;
+  }
 }
 
 function defaultLegendHtml(mode) {

@@ -166,9 +166,10 @@ export function createFollowController({ laneNodes, laneViews, laneSims, orienta
  */
 export function describeFollow(state, passenger) {
   if (!passenger) return '';
-  const letter = state.cabin.columnInfo
-    ? (state.cabin.columnInfo[passenger.col] && state.cabin.columnInfo[passenger.col].letter) || String.fromCharCode(65 + passenger.col)
-    : String.fromCharCode(65 + passenger.col);
+  const cabin = state.cabin;
+  // Row-aware letter lookup: sectioned cabins carry per-row column info, so the letter for a
+  // first-class 2A does not accidentally read from the economy section's wider layout.
+  const letter = seatLetterFor(cabin, passenger);
   const totalBags = Number.isFinite(passenger.bagCount) ? passenger.bagCount : 0;
   const remainingRaw = Number.isFinite(passenger.bagsRemaining)
     ? passenger.bagsRemaining
@@ -180,5 +181,35 @@ export function describeFollow(state, passenger) {
   const split = passenger.timeSplit || { seatedWait: 0, aisleBlocked: 0, bags: 0, walking: 0 };
   const waited = formatClock((split.seatedWait || 0) + (split.aisleBlocked || 0));
   const walked = formatClock(split.walking || 0);
-  return `Seat ${passenger.row}${letter} · ${bagText}${remainderText} · waited ${waited} · walked ${walked}`;
+  // Class label only when the cabin has more than one class; single-class cabins keep the old
+  // "Seat 12A · 1 bag · ..." shape so the tooltip does not sprout a redundant "Economy" tag on
+  // every dot on an A320.
+  const classText = classLabelForPassenger(cabin, passenger);
+  const classSlot = classText ? ` · ${classText}` : '';
+  return `Seat ${passenger.row}${letter}${classSlot} · ${bagText}${remainderText} · waited ${waited} · walked ${walked}`;
 }
+
+function seatLetterFor(cabin, passenger) {
+  const sectionsIndex = cabin && cabin.sectionsIndex;
+  const rowInfo = sectionsIndex && sectionsIndex.rowIndex
+    && sectionsIndex.rowIndex.columnInfoByRow
+    && sectionsIndex.rowIndex.columnInfoByRow[passenger.row];
+  if (rowInfo && rowInfo[passenger.col]) return rowInfo[passenger.col].letter;
+  if (cabin && cabin.columnInfo && cabin.columnInfo[passenger.col]) {
+    return cabin.columnInfo[passenger.col].letter;
+  }
+  return String.fromCharCode(65 + passenger.col);
+}
+
+function classLabelForPassenger(cabin, passenger) {
+  if (!cabin || !cabin.isSectioned) return '';
+  const raw = passenger.cabinClass || 'economy';
+  return CLASS_LABEL[raw] || (raw ? raw[0].toUpperCase() + raw.slice(1) : '');
+}
+
+const CLASS_LABEL = Object.freeze({
+  first: 'First',
+  business: 'Business',
+  premium: 'Premium',
+  economy: 'Economy',
+});

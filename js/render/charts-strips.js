@@ -17,7 +17,10 @@ import {
   appendCircle, appendLine, appendRect, appendText,
 } from './charts-svg-dom.js';
 
-const STRIPS_PADDING_LEFT = 130;
+// Round-05: bumped from 130 -> 200 px so the wider airline labels ("Southwest (2026 assigned
+// seats)") fit inside the label gutter without clipping. Textbook labels are all much shorter
+// so they still sit comfortably in the same gutter.
+const STRIPS_PADDING_LEFT = 200;
 const STRIPS_PADDING_RIGHT = 24;
 const STRIPS_PADDING_TOP = 46;
 const STRIPS_PADDING_BOTTOM = 22;
@@ -55,8 +58,13 @@ export function renderStrips(host, series, options = {}) {
   const chartWidth = Math.max(1, chartX1 - chartX0);
 
   if (options.title) {
+    // Round-05: pin the title to the LEFT edge so the finding sentence uses the full chart
+    // width even in a narrow container. Previously the title started at STRIPS_PADDING_LEFT
+    // (aligned to the numeric axis) and a long finding sentence like "easyJet boards fastest
+    // at 24:39; Reverse pyramid still wins on paper at 13:32." got clipped by the SVG viewBox
+    // in the ~500 px main column.
     appendText(svg, {
-      x: chartX0, y: 20,
+      x: 4, y: 20,
       'font-size': STRIPS_TITLE_FONT_PX,
       'font-weight': 600,
       fill: THEME.ink,

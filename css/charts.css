@@ -124,6 +124,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Light rule between the textbook and airline groups of strips in board mode. Same paper +
+ * rule tokens as the rest of the chart chrome so the split reads as a soft group divider,
+ * not a heavy section break. */
+.compare-group-rule {
+  height: 1px;
+  background: var(--rule);
+  margin: 10px 0 8px;
+  opacity: 0.7;
+}
+
 /* When the time-split renders a below-segment label because a segment was too narrow to fit
    inline, we put those "hint" lines under the bar so the value never disappears silently. */
 .time-split .below-labels {

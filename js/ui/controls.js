@@ -102,19 +102,74 @@ export function mountControls({ store, sound, race }) {
   }
 
   function populatePresetSelect(currentId) {
-    // The layout numbers stay in the option text because people recognise 3-3 and 2-3-2 by
-    // shape. The plain label carries the aircraft name and seat count.
+    // Two optgroups so a reader sees the split between single-class and multi-class layouts at
+    // a glance: single-class presets (the original nine, listed with layout + seat count) and
+    // multi-class presets (the four sectioned ones, listed with a "first + economy" style
+    // shorthand). Group labels track design/04-page.md.
     const select = document.getElementById('preset-select');
     if (!select) return;
     select.innerHTML = '';
+    const singleClass = document.createElement('optgroup');
+    singleClass.label = 'Single class';
+    const withFirst = document.createElement('optgroup');
+    withFirst.label = 'With first class';
     for (const preset of CABIN_PRESETS) {
       const option = document.createElement('option');
       option.value = preset.id;
-      const seats = preset.rows * preset.layout.reduce((a, b) => a + b, 0);
-      option.textContent = `${preset.label} · ${preset.layout.join('-')} · ${seats} seats`;
+      option.textContent = presetOptionText(preset);
       if (preset.id === currentId) option.selected = true;
-      select.appendChild(option);
+      if (isMultiClassPreset(preset)) withFirst.appendChild(option);
+      else singleClass.appendChild(option);
     }
+    if (singleClass.children.length > 0) select.appendChild(singleClass);
+    if (withFirst.children.length > 0) select.appendChild(withFirst);
+  }
+
+  function isMultiClassPreset(preset) {
+    // Multi-class means the preset carries more than one cabin class. A single-section preset
+    // (like b737max8-lcc, whose one section is all economy with a front-row premium-legroom
+    // flag) reads as single-class in the UI even though its shape lives in `sections`.
+    if (!Array.isArray(preset.sections) || preset.sections.length === 0) return false;
+    const classes = new Set();
+    for (const section of preset.sections) classes.add(section.cabinClass || 'economy');
+    return classes.size > 1;
+  }
+
+  function presetOptionText(preset) {
+    if (isMultiClassPreset(preset)) {
+      // "737-800, first + economy · 162 seats" — plain text, no layout string since each
+      // section has its own layout and reading "2-2 / 3-3 / 3-3" would be noise.
+      const parts = [];
+      let hasFirst = false;
+      let hasBusiness = false;
+      let hasPremium = false;
+      let hasEconomy = false;
+      let totalSeats = 0;
+      for (const section of preset.sections) {
+        const rowSeats = section.layout.reduce((a, b) => a + b, 0);
+        totalSeats += section.rows * rowSeats;
+        if (section.cabinClass === 'first') hasFirst = true;
+        else if (section.cabinClass === 'business') hasBusiness = true;
+        else if (section.cabinClass === 'premium') hasPremium = true;
+        else hasEconomy = true;
+      }
+      if (hasFirst) parts.push('first');
+      if (hasBusiness) parts.push('business');
+      if (hasPremium) parts.push('premium');
+      if (hasEconomy) parts.push('economy');
+      const shorthand = parts.join(' + ');
+      return `${preset.label}, ${shorthand} · ${totalSeats} seats`;
+    }
+    // Single-class shape: "A320 / 737 · 3-3 · 180 seats". Falls back to the single-section
+    // fields on a sections-only preset (b737max8-lcc) so those still read the same shape.
+    const layout = Array.isArray(preset.layout)
+      ? preset.layout
+      : (preset.sections && preset.sections[0] && preset.sections[0].layout) || [];
+    const rows = Number.isFinite(preset.rows)
+      ? preset.rows
+      : (preset.sections && preset.sections[0] && preset.sections[0].rows) || 0;
+    const seats = rows * layout.reduce((a, b) => a + b, 0);
+    return `${preset.label} · ${layout.join('-')} · ${seats} seats`;
   }
 
   function bindPresetSelect() {

@@ -22,10 +22,20 @@ import { createSound } from './ui/sound.js';
 import { mountInfoButtons, createInfoButton } from './ui/info-popover.js';
 import { mountSettingsDrawer } from './ui/settings-drawer.js';
 import {
-  DEPLANE_STRATEGIES, BOARD_STRATEGIES, DEFAULT_DEPLANE_STRATEGY_ID, DEFAULT_BOARD_STRATEGY_ID,
+  DEPLANE_STRATEGIES, BOARD_STRATEGIES, BOARD_STRATEGY_BY_ID,
+  DEFAULT_DEPLANE_STRATEGY_ID, DEFAULT_BOARD_STRATEGY_ID,
 } from './engine/strategies/index.js';
 import { CABIN_PRESET_BY_ID, DEFAULT_CABIN_PRESET_ID } from './engine/cabin-presets.js';
 import { PASSENGER_DEFAULTS } from './engine/config.js';
+
+// Preset defaults per mode: deplane keeps the A320 baseline (round 03 default); board switches
+// to the 737-800 first + economy preset so the new default matchup (Random order vs United
+// Airlines) has a real first-class cabin to demonstrate the airline procedures on.
+const DEFAULT_PRESET_BY_MODE = Object.freeze({
+  deplane: DEFAULT_CABIN_PRESET_ID,
+  board: 'b738-two-class',
+});
+const DEFAULT_BOARD_MATCHUP_AIRLINE = 'united';
 
 const DEFAULTS = Object.freeze({
   mode: 'deplane',
@@ -33,14 +43,17 @@ const DEFAULTS = Object.freeze({
   // Fix for NEW3-M4: the round-3 critic caught that the previous default (free-for-all vs
   // aisle-first) was a 59/41 tie with a three-second median margin. Free-for-all vs row-by-row
   // is the announced "please remain seated until the row ahead has left" policy losing by
-  // roughly two and a half times, which is the finding the site is named for. It also gives the
-  // two cabins visibly-different behaviour from t=0 (free-for-all: everyone stands; row-by-row:
-  // one row stands at a time), so the 45 s staging window is now a demonstration, not two
-  // identical stopped cabins. Two doors is one dropdown away and wins the compare chart, which
-  // is where its 2:20-median-margin belongs.
+  // roughly two and a half times, which is the finding the site is named for. Two doors is one
+  // dropdown away and wins the compare chart, which is where its 2:20-median-margin belongs.
   strategyB: 'row-by-row',
+  // Round-05: board mode defaults to Random order (the baseline every airline still uses under
+  // status and cabin) against United Airlines (the real WILMA procedure United has run since
+  // 2023). Two airline procedures matter here: one is the announced order gate agents call, and
+  // one is the physics-motivated "windows before middles before aisles" that United's own memo
+  // says saves about two minutes per turn. The finding is that a real airline procedure
+  // materially beats the baseline every airline still falls back to.
   boardStrategyA: DEFAULT_BOARD_STRATEGY_ID,
-  boardStrategyB: 'steffen',
+  boardStrategyB: DEFAULT_BOARD_MATCHUP_AIRLINE,
   presetId: DEFAULT_CABIN_PRESET_ID,
   loadFactor: 0.85,
   compliance: PASSENGER_DEFAULTS.compliance,
@@ -116,6 +129,38 @@ function readFromLocalStorage(defaults) {
   }
 }
 
+/**
+ * If nothing in the URL or localStorage pinned the preset, switch to the per-mode default. This
+ * is why a cold visit in board mode lands on the 737-800 first + economy preset (so the
+ * matchup shows off the first-class cabin the airline strategies actually order by) while
+ * a cold deplane visit stays on the A320.
+ */
+function applyPerModeDefaults(state, hadStoredState, urlParams) {
+  if (hadStoredState) return state;
+  if (urlParams && urlParams.has('preset')) return state;
+  const perMode = DEFAULT_PRESET_BY_MODE[state.mode];
+  if (perMode && CABIN_PRESET_BY_ID[perMode]) return { ...state, presetId: perMode };
+  return state;
+}
+
+/**
+ * Board-mode default matchup validator. When the airline strategies module has not been
+ * imported (or the default airline id is not registered for any other reason), fall back to a
+ * textbook strategy so the page still boots. The default airline is the round-05 pick; the
+ * fallback here matches the round-03 pick (Steffen). Never silently swaps a URL / localStorage
+ * value: only the default gets rewritten.
+ */
+function ensureBoardDefaultsAvailable(state, hadStoredState, urlParams) {
+  if (state.mode !== 'board') return state;
+  const uniquelyDefault = !hadStoredState
+    && !(urlParams && (urlParams.has('a') || urlParams.has('b')));
+  if (!uniquelyDefault) return state;
+  const next = { ...state };
+  if (!BOARD_STRATEGY_BY_ID[next.boardStrategyA]) next.boardStrategyA = DEFAULT_BOARD_STRATEGY_ID;
+  if (!BOARD_STRATEGY_BY_ID[next.boardStrategyB]) next.boardStrategyB = 'steffen';
+  return next;
+}
+
 function persistToLocalStorage(state) {
   try {
     window.localStorage.setItem('prs.state', JSON.stringify(state));
@@ -125,8 +170,13 @@ function persistToLocalStorage(state) {
 }
 
 function initialState() {
-  const stored = readFromLocalStorage(DEFAULTS) || { ...DEFAULTS };
-  return readFromUrl(stored);
+  const storedRaw = readFromLocalStorage(DEFAULTS);
+  const hadStoredState = storedRaw != null;
+  const stored = storedRaw || { ...DEFAULTS };
+  const fromUrl = readFromUrl(stored);
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const withPerMode = applyPerModeDefaults(fromUrl, hadStoredState, urlParams);
+  return ensureBoardDefaultsAvailable(withPerMode, hadStoredState, urlParams);
 }
 
 function boot() {

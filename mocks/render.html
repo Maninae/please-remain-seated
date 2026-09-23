@@ -50,6 +50,11 @@
 </section>
 
 <section class="row">
+  <p class="row-title">737-800 two-class (first 2-2 / extra-legroom 3-3 / main 3-3), horizontal</p>
+  <canvas id="cabin-b738-sect" class="horiz-canvas wide"></canvas>
+</section>
+
+<section class="row">
   <p class="row-title">A320 (3-3), 30 rows, vertical (phone width)</p>
   <div class="vertical-wrap">
     <canvas id="cabin-a320-v" class="vertical-canvas"></canvas>
@@ -86,6 +91,13 @@
   mountCabin('cabin-a320', { layout: [3, 3], rows: 30, rearDoor: false }, 'horizontal', 11);
   mountCabin('cabin-crj', { layout: [2, 2], rows: 17, rearDoor: false }, 'horizontal', 22);
   mountCabin('cabin-777', { layout: [3, 4, 3], rows: 36, rearDoor: true }, 'horizontal', 33);
+  mountCabin('cabin-b738-sect', {
+    sections: [
+      { id: 'first', label: 'First', cabinClass: 'first', layout: [2, 2], rows: 4, rowPitchMeters: 0.94, binCapacityPerSeatRow: 1.0 },
+      { id: 'premium', label: 'Extra legroom', cabinClass: 'economy', premium: true, layout: [3, 3], rows: 6, rowPitchMeters: 0.86, binCapacityPerSeatRow: 1.0 },
+      { id: 'economy', label: 'Main Cabin', cabinClass: 'economy', layout: [3, 3], rows: 20, rowPitchMeters: 0.79, binCapacityPerSeatRow: 1.0 },
+    ],
+  }, 'horizontal', 55);
   mountCabin('cabin-a320-v', { layout: [3, 3], rows: 30, rearDoor: false }, 'vertical', 44);
 
   renderStrips(document.getElementById('strips'), mockStrategySeries(), {

@@ -22,8 +22,10 @@ js/engine/                    headless, deterministic per seed. No DOM, no Math.
   rng.js                        seeded PRNG; fork() derives an independent stream from the same seed
   distributions.js              weibull / lognormal / exponential / uniform samplers
   types.js                      shared enums and the state/passenger shape every module codes against
-  cabin.js                      cabin geometry: seat blocks, per-aisle lattices, doors, bin index map
-  cabin-presets.js              the 9 aircraft presets (id, layout, rows, bin era, note)
+  cabin.js                      cabin geometry: seat blocks, per-aisle lattices, doors, bin index map, sections
+  cabin-sections.js             per-section math: buildSections / buildRowIndex / buildBinIndex + computeColumnInfo
+  cabin-presets.js              the 9 single-class + 4 multi-class aircraft presets (id, layout, rows, sections, bin era, note)
+  cabin-presets-sections.js     the four multi-class presets (b738-two-class, a321neo-three-class, b737max8-lcc, b789-three-class)
   passengers.js                 population sampling: seats, bags, groups, per-passenger draws
   bins.js                       overhead bin capacity + the forward/aft overflow search
   aisle.js                      aisle cell claim/release + the shared door-server admission
@@ -34,16 +36,19 @@ js/engine/                    headless, deterministic per seed. No DOM, no Math.
   deplane-walk.js               walker movement: swap arbitration, front-first update order, door exits
   board-sim.js                  boarding state machine (QUEUED -> WALKING -> STOWING -> ... -> SEATED)
   board-rules.js                strategy-order shuffles (non-compliance, group adjacency) + interference classifier
-  strategies/index.js           strategy registry, looked up by id
+  strategies/index.js           strategy registry, looked up by id; tags each board strategy with a `family` field ('textbook' or 'airline') so the UI can group them
   strategies/deplane.js         the 7 deplaning strategies
-  strategies/board.js           the 9 boarding strategies (8 queue-order strategies + open-seating)
+  strategies/board.js           the 9 textbook boarding strategies (8 queue-order strategies + open-seating)
+  strategies/airlines.js        the 14 airline boarding procedures (Alaska, American, Delta, United, Southwest, JetBlue, Frontier, Hawaiian, Ryanair, easyJet, Lufthansa, British Airways, Air Canada, ANA)
+  strategies/group-order.js     turns an airline's ordered `groups` list into a boarding queue (pre-boarders first, then each group in order, within-group rule per group)
   strategies/open-seating.js    the open-seating picker: passengers choose their own seat, not a queue order
 
 js/render/                    canvas + SVG drawing. Reads state, never mutates it.
   theme.js                       colour + type tokens (mirrors css/base.css) plus the heat-view ramp
-  cabin-layout.js                pure geometry: fuselage bounds, seat rects, door gaps, row labels
-  cabin-layout-bins.js           the bin-strip geometry pass, split out of cabin-layout.js
-  cabin-view.js                  canvas cabin renderer, any layout and aisle count, hitTest(), setHeat()
+  cabin-layout.js                pure geometry orchestrator: fuselage bounds, seat rects, door gaps, section-aware output
+  cabin-layout-sections.js       per-section geometry: cross layouts (wider first-class seats), aisle lanes, seats, bin strips, row labels, dividers
+  cabin-layout-bins.js           the bin-strip geometry pass, section-aware via binIndexOffset
+  cabin-view.js                  canvas cabin renderer, any layout and aisle count, section dividers + labels, hitTest(), setHeat()
   charts.js                      barrel: re-exports renderStrips and renderTimeSplit
   charts-strips.js               strip chart: dots + p10-p90 band + median tick + finding title
   charts-time-split.js           stacked-bar time-split renderer with a shared scale

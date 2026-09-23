@@ -328,18 +328,47 @@ export function mountRace({ store, onFinish }) {
   function populateStrategySelects() {
     const state = store.state();
     const strategies = state.mode === 'deplane' ? DEPLANE_STRATEGIES : BOARD_STRATEGIES;
+    // In board mode the strategy list is grouped by `family` so a reader sees the split
+    // between textbook methods (random, WILMA, Steffen, ...) and real airline procedures.
+    // Deplane strategies do not carry a `family` field today; they render as one flat list.
     for (let i = 0; i < LANES.length; i += 1) {
       const select = laneNodes[i].strategySelect;
       const currentId = currentStrategyIdForLane(i);
       select.innerHTML = '';
-      for (const strategy of strategies) {
-        const option = document.createElement('option');
-        option.value = strategy.id;
-        option.textContent = strategy.label;
-        if (strategy.id === currentId) option.selected = true;
-        select.appendChild(option);
+      if (state.mode === 'board') {
+        populateBoardSelectGrouped(select, strategies, currentId);
+      } else {
+        for (const strategy of strategies) {
+          select.appendChild(makeOption(strategy, currentId));
+        }
       }
     }
+  }
+
+  function populateBoardSelectGrouped(select, strategies, currentId) {
+    const textbook = document.createElement('optgroup');
+    textbook.label = 'Textbook methods';
+    const airline = document.createElement('optgroup');
+    airline.label = 'How airlines actually board';
+    for (const strategy of strategies) {
+      // Treat any strategy without a `family` (or with `family === 'textbook'`) as textbook.
+      // Only strategies explicitly tagged 'airline' land in the second group. If the airline
+      // module has not been imported yet the second group stays empty and the select stays
+      // valid.
+      const option = makeOption(strategy, currentId);
+      if (strategy.family === 'airline') airline.appendChild(option);
+      else textbook.appendChild(option);
+    }
+    if (textbook.children.length > 0) select.appendChild(textbook);
+    if (airline.children.length > 0) select.appendChild(airline);
+  }
+
+  function makeOption(strategy, currentId) {
+    const option = document.createElement('option');
+    option.value = strategy.id;
+    option.textContent = strategy.label;
+    if (strategy.id === currentId) option.selected = true;
+    return option;
   }
 
   function updateBlurbs() {
@@ -361,7 +390,7 @@ export function mountRace({ store, onFinish }) {
     // shape (a number, then the mechanism).
     deck.textContent = store.state().mode === 'deplane'
       ? 'The last person off spends six minutes on a plane they could walk out of in twenty seconds. One aisle, one lane, no overtaking.'
-      : 'The last passenger on spends twenty minutes stuck behind the aisle before they can sit down. Same people, same bags, two ways on.';
+      : 'A real airline procedure races the baseline every airline still falls back to. Same people, same bags, two ways on.';
 
     // Legend copy differs by mode: deplaning shows "bag" (retrieval), boarding shows "stowing".
     const legend = document.querySelector('.cabin-card[data-lane="a"] .race-legend .swatch.bag');

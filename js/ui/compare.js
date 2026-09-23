@@ -134,29 +134,99 @@ export function mountCompare({ store, race }) {
     const racingIds = state.mode === 'deplane'
       ? [state.strategyA, state.strategyB]
       : [state.boardStrategyA, state.boardStrategyB];
-    const sorted = [...results].sort((a, b) => a.median - b.median);
-    const series = sorted.map((row) => ({
-      id: row.strategyId,
-      label: row.label,
-      values: row.totalSeconds,
-      highlight: racingIds.includes(row.strategyId),
-    }));
-    stripsWrap.innerHTML = '';
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    stripsWrap.appendChild(svg);
-    const width = Math.max(320, Math.min(1080, stripsWrap.clientWidth || 720));
-    renderStrips(svg, series, {
-      width,
-      title: findingSentenceFor(state.mode, sorted, racingIds),
+    // In board mode, group the strips by `family`: textbook rows first (sorted by median),
+    // then a small group label and a light rule, then airline rows (sorted by median). The
+    // strategy list carries `family` on each entry; we look each result's family up so a
+    // reordered results array still groups correctly.
+    const strategiesById = new Map();
+    for (const strategy of (state.mode === 'deplane' ? DEPLANE_STRATEGIES : BOARD_STRATEGIES)) {
+      strategiesById.set(strategy.id, strategy);
+    }
+    const familyFor = (id) => {
+      const strategy = strategiesById.get(id);
+      if (!strategy || !strategy.family) return 'textbook';
+      return strategy.family;
+    };
+    const textbookResults = results.filter((r) => familyFor(r.strategyId) !== 'airline');
+    const airlineResults = results.filter((r) => familyFor(r.strategyId) === 'airline');
+    textbookResults.sort((a, b) => a.median - b.median);
+    airlineResults.sort((a, b) => a.median - b.median);
+    const grouped = state.mode === 'board' && airlineResults.length > 0;
+    const sortedForFinding = [...results].sort((a, b) => a.median - b.median);
+    const title = findingSentenceForGrouped(state.mode, sortedForFinding, racingIds, {
+      textbook: textbookResults, airline: airlineResults,
     });
-    // Small timing note under the strips so the reader knows how long it took.
+
+    stripsWrap.innerHTML = '';
+    const width = Math.max(320, Math.min(1080, stripsWrap.clientWidth || 720));
+
+    if (!grouped) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      stripsWrap.appendChild(svg);
+      const series = sortedForFinding.map((row) => ({
+        id: row.strategyId, label: row.label, values: row.totalSeconds,
+        highlight: racingIds.includes(row.strategyId),
+      }));
+      renderStrips(svg, series, { width, title });
+    } else {
+      // Two SVGs stacked in the same wrap. The first carries the finding sentence as its title
+      // and the textbook rows; the second carries a small group label ("How airlines actually
+      // board") as its title and the airline rows. A light rule between them makes the split
+      // read as one dataset in two families, not two unrelated charts.
+      const textbookSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      stripsWrap.appendChild(textbookSvg);
+      renderStrips(textbookSvg, textbookResults.map((row) => ({
+        id: row.strategyId, label: row.label, values: row.totalSeconds,
+        highlight: racingIds.includes(row.strategyId),
+      })), { width, title });
+
+      const rule = document.createElement('div');
+      rule.className = 'compare-group-rule';
+      stripsWrap.appendChild(rule);
+
+      const airlineSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      stripsWrap.appendChild(airlineSvg);
+      renderStrips(airlineSvg, airlineResults.map((row) => ({
+        id: row.strategyId, label: row.label, values: row.totalSeconds,
+        highlight: racingIds.includes(row.strategyId),
+      })), { width, title: 'How airlines actually board' });
+    }
+
+    const totalRows = textbookResults.length + airlineResults.length;
+    const anySeeds = (textbookResults[0] || airlineResults[0] || {}).totalSeconds || [];
     const note = document.createElement('p');
     note.className = 'compare-timing';
-    note.textContent = `${series.length} strategies · ${series[0].values.length} seeds · ${(elapsedMs / 1000).toFixed(1)}s`;
+    note.textContent = `${totalRows} strategies · ${anySeeds.length} seeds · ${(elapsedMs / 1000).toFixed(1)}s`;
     stripsWrap.appendChild(note);
   }
 }
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/**
+ * Compose the finding-sentence title for the strip chart. In board mode with both textbook and
+ * airline families present, name the fastest airline AND the fastest textbook method by their
+ * median totals so the reader sees the two headline entries at a glance ("United boards fastest
+ * (5:34) among airlines; the Steffen method still wins on paper at 4:11."). Falls back to the
+ * shared single-family formatter when only one family is present.
+ */
+function findingSentenceForGrouped(mode, sortedResults, racingIds, families) {
+  const hasAirline = families && Array.isArray(families.airline) && families.airline.length > 0;
+  const hasTextbook = families && Array.isArray(families.textbook) && families.textbook.length > 0;
+  if (mode !== 'board' || !hasAirline || !hasTextbook) {
+    return findingSentenceFor(mode, sortedResults, racingIds);
+  }
+  const bestAirline = families.airline[0];
+  const bestTextbook = families.textbook[0];
+  return `${bestAirline.label} boards fastest at ${formatClockLocal(bestAirline.median)}; `
+    + `${bestTextbook.label} still wins on paper at ${formatClockLocal(bestTextbook.median)}.`;
+}
+
+function formatClockLocal(seconds) {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  const secs = total - minutes * 60;
+  return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
 }

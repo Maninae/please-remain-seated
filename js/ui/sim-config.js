@@ -12,13 +12,28 @@ import { DEPLANE_STRATEGY_BY_ID } from '../engine/strategies/index.js';
 export function cabinOverridesFromState(state) {
   const preset = CABIN_PRESET_BY_ID[state.presetId] || CABIN_PRESET_BY_ID.a320;
   const overrides = {
-    layout: preset.layout.slice(),
-    rows: preset.rows,
-    rowPitchMeters: preset.rowPitchMeters,
-    binCapacityPerSeatRow: preset.binCapacityPerSeatRow,
     loadFactor: state.loadFactor,
   };
-  if (state.bins === 'legacy') overrides.binCapacityPerSeatRow = 0.67;
+  if (Array.isArray(preset.sections) && preset.sections.length > 0) {
+    // Sectioned preset: hand the sections through unchanged. Each section carries its own
+    // layout, pitch, and bin era; the top-level `binCapacityPerSeatRow` still rides along so
+    // the single-section fallback the engine keeps for older overrides stays consistent.
+    overrides.sections = preset.sections;
+    if (preset.premiumRows) overrides.premiumRows = preset.premiumRows;
+    if (Number.isFinite(preset.binCapacityPerSeatRow)) {
+      overrides.binCapacityPerSeatRow = preset.binCapacityPerSeatRow;
+    }
+  } else {
+    overrides.layout = preset.layout.slice();
+    overrides.rows = preset.rows;
+    overrides.rowPitchMeters = preset.rowPitchMeters;
+    overrides.binCapacityPerSeatRow = preset.binCapacityPerSeatRow;
+    // Legacy bin era only applies to single-section presets: each section on a multi-class
+    // preset already declares its own bin era (a lie-flat business bin is per-suite, not the
+    // shared main-cabin bin), so overriding here would misreport a business cabin as a legacy
+    // retrofit. This is the same rule the design contract uses.
+    if (state.bins === 'legacy') overrides.binCapacityPerSeatRow = 0.67;
+  }
   return overrides;
 }
 

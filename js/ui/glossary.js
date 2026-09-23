@@ -187,6 +187,156 @@ export const GLOSSARY = Object.freeze({
     },
   },
 
+  // -------------------- multi-class aircraft presets --------------------
+
+  'b738-two-class': {
+    title: '737-800, first + economy',
+    body: 'The standard US mainline 737-800. Sixteen first-class seats up front in a 2-2 layout with wider recliners, then six rows of extra-legroom economy, then twenty rows of standard 3-3 economy. Alaska Airlines and American Airlines both fly this configuration.',
+    learnMore: {
+      label: 'Alaska 737-800 seat map',
+      href: 'https://www.alaskaair.com/content/travel-info/flight-experience/aircraft/737-800',
+    },
+  },
+  'a321neo-three-class': {
+    title: 'A321neo, three classes',
+    body: 'A stretched A321neo in the US transcon three-class layout: twenty first-class seats up front (2-2, wide recliners), fifty-four extra-legroom economy seats, then a hundred and forty-four standard 3-3 economy seats. Alaska and Delta both fly variants of this.',
+    learnMore: {
+      label: 'Delta A321neo seat map',
+      href: 'https://www.delta.com/us/en/aircraft/airbus/a321neo',
+    },
+  },
+  'b737max8-lcc': {
+    title: '737 MAX 8, low-cost',
+    body: 'A 737 MAX 8 in single-class low-cost configuration: every row is 3-3, one hundred and seventy-four seats, and the front five rows are sold as extra legroom. Ryanair and Southwest use variants of this.',
+    learnMore: {
+      label: 'Ryanair 737 MAX 8 seat map',
+      href: 'https://www.ryanair.com/gb/en/plan-trip/flying-with-us/our-fleet',
+    },
+  },
+  'b789-three-class': {
+    title: '787-9, three classes',
+    body: 'A long-haul Boeing 787-9 in the standard three-class layout: forty-eight lie-flat business suites at the front in 1-2-1, then a small premium-economy cabin in 2-3-2, then the main 3-3-3 economy cabin. Business rows are longer than economy because the seats fold flat. United, ANA, and JAL fly this.',
+    learnMore: {
+      label: 'United 787-9 seat map',
+      href: 'https://www.united.com/ual/en/us/fly/travel/inflight/aircraft/787-9.html',
+    },
+  },
+
+  // -------------------- airline boarding procedures --------------------
+
+  alaska: {
+    title: 'Alaska Airlines',
+    body: 'Alaska boards First, then A (top elites, families with young kids, active military, oneworld Emerald and Sapphire), then B (Silver elites and Premium Class), then C (Alaska Visa cardholders), then D and E (rear half of Main Cabin, then front half), then F (Saver fare last). Hybrid: status and cabin first, back-to-front within economy. Current as of September 2026.',
+    learnMore: {
+      label: 'Alaska boarding process',
+      href: 'https://www.alaskaair.com/content/travel-info/flight-experience/our-boarding-process',
+    },
+  },
+  american: {
+    title: 'American Airlines',
+    body: 'American boards by pure fare and status: pre-boarding for ConciergeKey, First, Business, unaccompanied minors, wheelchair, active military, and families with kids under two, then Groups 1 through 9 by status tier and fare bucket, with Basic Economy last. No seat-location ordering. Restructured in May 2025 and current as of September 2026.',
+    learnMore: {
+      label: 'American Airlines boarding',
+      href: 'https://www.aa.com/i18n/travel-info/during-trip/boarding-your-flight.jsp',
+    },
+  },
+  delta: {
+    title: 'Delta Air Lines',
+    body: 'Delta boards by fare and status only: pre-board for assistance and active military, then Group 1 (Delta One and First), Group 2 (Diamond Medallion and Premium Select), Group 3 (Comfort+), Group 4 (Sky Priority), Groups 5 through 7 (Main Cabin by branded fare), and Group 8 (Basic Economy) last. Current as of September 2026.',
+    learnMore: {
+      label: 'Delta boarding page',
+      href: 'https://www.delta.com/us/en/onboard/travel-experience-onboard/boarding',
+    },
+  },
+  united: {
+    title: 'United Airlines',
+    body: 'United boards Polaris, First, and top elites first, then Premier Platinum and Gold, then Silver and Economy Plus. Economy then boards window seats first, then middle seats, then aisle seats, with Basic Economy last. This is the WILMA order that United says saves about two minutes per turn. Current since October 2023 and still current as of September 2026.',
+    learnMore: {
+      label: 'United on WILMA (CNBC Select)',
+      href: 'https://www.cnbc.com/select/united-boarding-process-prioritize-window-seats/',
+    },
+  },
+  southwest: {
+    title: 'Southwest Airlines',
+    body: 'Southwest switched from open seating to assigned seats in January 2026. They now board pre-board first, then A-List Preferred as a dedicated group, then eight numbered groups: A-List and Choice Extra, extra-legroom, Choice Preferred (twice), cardholders, Choice, and finally Basic. Family boarding for adults with a child six or under slots between Groups 2 and 3.',
+    learnMore: {
+      label: 'Southwest assigned seating',
+      href: 'https://www.southwest.com/customer-enhancements/assigned-seating/',
+    },
+  },
+  jetblue: {
+    title: 'JetBlue',
+    body: 'JetBlue moved to numbered groups on April 29, 2026. Pre-board for extra time, then Group 1 (Mint business and top Mosaic), Group 2 (EvenMore extra-legroom and mid-Mosaic), Group 3 (JetBlue cardholders and Blue Extra fare), then Groups 4 through 8 by seat location (rear-first), with Blue Basic last. Current as of September 2026.',
+    learnMore: {
+      label: 'JetBlue boarding procedures',
+      href: 'https://www.jetblue.com/help/boarding-procedures',
+    },
+  },
+  frontier: {
+    title: 'Frontier Airlines',
+    body: 'Frontier boards in seven groups since October 2, 2025: pre-board for assistance, Elite Diamond, military, and families with kids under two, then Elite Platinum and Business bundle, then Silver and members with carry-ons, then paid carry-on, then cardholders and Priority Boarding, then general members, and finally Basic fare split rear then front. Current as of September 2026.',
+    learnMore: {
+      label: 'Frontier boarding page',
+      href: 'https://faq.flyfrontier.com/help/frontier-boarding-process',
+    },
+  },
+  hawaiian: {
+    title: 'Hawaiian Airlines',
+    body: 'Hawaiian moved to the same A through F system as Alaska in 2026 on their shared reservation system: pre-board, First, A (top elites, families with young kids, military), B (Silver and Extra Comfort), C (cardholders), D (Main rear), E (Main front), and F (Main Basic) last. Current as of September 2026.',
+    learnMore: {
+      label: 'Alaska + Hawaiian shared PSS',
+      href: 'https://news.alaskaair.com/company/alaska-airlines-hawaiian-airlines-transition-to-shared-passenger-service-system-to-deliver-a-more-seamless-guest-experience/',
+    },
+  },
+  ryanair: {
+    title: 'Ryanair',
+    body: 'Ryanair uses only two groups after a pre-board for reduced mobility: Priority (paid Priority Boarding or a Priority fare with two cabin bags), then everyone else. When the gate allows it Ryanair also boards through the rear door as well as the front. Current as of September 2026.',
+    learnMore: {
+      label: 'Ryanair boarding guide',
+      href: 'https://whichterminal.co.uk/guides/ryanair-boarding-process-explained',
+    },
+  },
+  easyjet: {
+    title: 'easyJet',
+    body: 'easyJet boards in three groups after pre-boarding for special assistance: Speedy Boarding (easyJet Plus, Up Front, Extra Legroom, Large Cabin Bag), then families with children under five, then everyone else. easyJet uniquely boards through both front and rear doors at the same time when the aircraft parks on a stand. Current as of September 2026.',
+    learnMore: {
+      label: 'easyJet boarding groups',
+      href: 'https://upgradedpoints.com/travel/airlines/easyjet-boarding-groups/',
+    },
+  },
+  lufthansa: {
+    title: 'Lufthansa',
+    body: 'Lufthansa boards pre-board (kids under five, unaccompanied minors, mobility), then First and HON Circle, then Business, Senator, and Star Alliance Gold, then Premium Economy on long-haul, then economy in window, middle, aisle order with Light fare last. Current as of September 2026.',
+    learnMore: {
+      label: 'Lufthansa boarding page',
+      href: 'https://www.lufthansa.com/us/en/boarding',
+    },
+  },
+  'british-airways': {
+    title: 'British Airways',
+    body: 'British Airways simplified its groups in April 2025. Pre-board for families with kids under two and mobility, then Group 0 (top-tier trial), Group 1 (First and Gold), Group 2 (Club Europe, Silver, Premium Economy), Group 3 (Bronze), Group 4 (everyone else), and on short-haul Group 5 (Basic fare) last. Current as of September 2026.',
+    learnMore: {
+      label: 'British Airways boarding',
+      href: 'https://www.britishairways.com/content/information/checking-in-and-boarding/boarding',
+    },
+  },
+  'air-canada': {
+    title: 'Air Canada',
+    body: 'Air Canada boards by fare and status: pre-board for wheelchair and extra time, then Zone 1 (Business and Super Elite plus one companion), Zone 2 (Premium Economy and top Aeroplan tiers plus Star Alliance Gold), a family zone for kids under six, Zone 3 (Latitude, Comfort, preferred seats), then Zones 4 through 6 for the rest of economy (rear-first). Current as of September 2026.',
+    learnMore: {
+      label: 'Air Canada boarding by zone',
+      href: 'https://www.aircanada.com/ca/en/aco/home/fly/at-the-airport/boarding-by-zone.html',
+    },
+  },
+  ana: {
+    title: 'ANA (All Nippon Airways)',
+    body: 'ANA has boarded in WILMA order in economy since November 15, 2021. Pre-board for wheelchair and infants under two, then Group 1 (Diamond and First), Group 2 (Platinum, Super Flyers, Star Alliance Gold, Business), then economy window, middle, and aisle in that order. Current as of September 2026.',
+    learnMore: {
+      label: 'ANA WILMA announcement',
+      href: 'https://www.ana.co.jp/en/us/offers-and-announcements/announcements/211115-boarding/',
+    },
+  },
+
   // -------------------- settings --------------------
 
   'how-full': {

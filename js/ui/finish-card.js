@@ -129,6 +129,18 @@ function renderCard(card, store, payload) {
   facts.textContent = `${preset} · load ${formatPercent(state.loadFactor)} · compliance ${formatPercent(state.compliance)} · families ${formatPercent(state.families)} · seed ${state.seed}`;
   card.appendChild(facts);
 
+  // Multi-class-only per-class finish line ("First class off in 0:48, economy in 6:10").
+  // Drawn just under the facts line so a reader who cares about the class breakdown finds it
+  // right where the aggregate result is. Single-class cabins get no extra line (the aggregate
+  // clock IS the economy total).
+  const byClassLine = renderByClassLine(payload);
+  if (byClassLine) {
+    const byClass = document.createElement('div');
+    byClass.className = 'by-class';
+    byClass.textContent = byClassLine;
+    card.appendChild(byClass);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'actions';
 
@@ -148,6 +160,40 @@ function renderCard(card, store, payload) {
   else if (pbResult.improved) pb.classList.add('new');
   card.appendChild(pb);
 }
+
+/**
+ * Compose the per-class summary line for a multi-class winner. Reads `byClass` off the
+ * finish-payload's `winnerByClass` (the finish controller supplies it from summary().byClass).
+ * Returns '' on a single-class result so the finish card stays compact for the A320 / 737
+ * standard case.
+ *
+ * Format: "First class off in 0:48, economy in 6:10" (deplane) or "First class on in 1:20,
+ * economy on in 9:45" (board), reading classes in the natural front-to-back order.
+ */
+function renderByClassLine(payload) {
+  const byClass = payload && payload.winnerByClass;
+  if (!byClass) return '';
+  const keys = Object.keys(byClass);
+  if (keys.length < 2) return '';
+  const verb = payload.mode === 'board' ? 'on' : 'off';
+  const order = ['first', 'business', 'premium', 'economy'];
+  const parts = [];
+  for (const key of order) {
+    const entry = byClass[key];
+    if (!entry || !Number.isFinite(entry.meanTotal)) continue;
+    const label = CLASS_FINISH_LABELS[key] || key;
+    parts.push(`${label} ${verb} in ${formatClock(entry.meanTotal)}`);
+  }
+  if (parts.length < 2) return '';
+  return parts.join(', ');
+}
+
+const CLASS_FINISH_LABELS = Object.freeze({
+  first: 'First class',
+  business: 'Business',
+  premium: 'Premium economy',
+  economy: 'Economy',
+});
 
 function pbLine(pbResult, winnerLabel) {
   if (pbResult.improved && pbResult.previous) {

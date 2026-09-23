@@ -124,7 +124,13 @@
   align-items: center;
 }
 
-.page-side .seed-row-side button {
+/*
+ * Direct-child button only: the New-plane button sits at grid col 1, row 1/2. Using the child
+ * combinator here keeps the taller 44 px tap target from leaking to the info button that lives
+ * nested inside the `<label>` for Seed (round-05 fix: the info button was rendering as a tall
+ * oval because a descendant selector matched every button in the row).
+ */
+.page-side .seed-row-side > button {
   grid-column: 1;
   grid-row: 1 / span 2;
   min-height: var(--tap);
@@ -246,9 +252,23 @@
   background: var(--paper);
   color: var(--ink-soft);
   cursor: pointer;
+  /*
+   * Pin the button to a square 22 px circle everywhere on the page. Flex containers with
+   * `align-items: stretch` (the default) will otherwise blow the button up to the tallest
+   * sibling and turn the "i" into a tall oval. `flex: 0 0 auto` guarantees the button stays
+   * at its intended intrinsic size, `max-height` guards against grid rows that would stretch
+   * it (the seed row inside the sidebar, the drawer's row layout, or a strategy-card grid
+   * cell), and `min-width` mirrors `min-height` so a narrow flex column can't collapse it.
+   */
   width: 22px;
   height: 22px;
+  min-width: 22px;
   min-height: 22px;
+  max-width: 22px;
+  max-height: 22px;
+  flex: 0 0 auto;
+  align-self: center;
+  box-sizing: border-box;
   border-radius: 50%;
   padding: 0;
   display: inline-flex;

@@ -104,8 +104,10 @@ export function createCabinView(canvas, options = {}) {
     if (heatState) drawHeatFills(ctx, geometry, heatState);
     else drawSeats(ctx, geometry);
     drawBins(ctx, geometry, state && state.bins);
+    drawSectionDividers(ctx, geometry);
     drawFuselageOutline(ctx, geometry);
     drawRowLabels(ctx, geometry);
+    drawSectionLabels(ctx, geometry);
     if (state && Array.isArray(state.passengers)) drawPassengers(ctx, geometry, state.passengers);
     if (heatState && heatState.worstKey) drawWorstSeatLabel(ctx, geometry, heatState);
 
@@ -359,6 +361,103 @@ function drawRowLabels(ctx, g) {
     ctx.fillText(String(label.row), label.x, label.y);
   }
   ctx.restore();
+}
+
+/**
+ * Section dividers. A thin cross-axis line at each section boundary, drawn UNDER the fuselage
+ * outline so the outline still frames the cabin cleanly. Single-section cabins render no
+ * dividers (the geometry pass returns an empty array).
+ */
+function drawSectionDividers(ctx, g) {
+  if (!g.sectionDividers || g.sectionDividers.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = THEME.rule;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  for (const divider of g.sectionDividers) {
+    ctx.beginPath();
+    ctx.moveTo(divider.x1, divider.y1);
+    ctx.lineTo(divider.x2, divider.y2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * Section labels. The label for the AFT section beside each divider (a divider between First
+ * and Economy carries "Economy"), plus the fore-most section's label at the front of the
+ * cabin. Placed in light gray outside the fuselage on the near side so the safety-card look
+ * stays uncluttered.
+ */
+function drawSectionLabels(ctx, g) {
+  // Section labels beside each divider ("First", "Extra legroom", "Main Cabin"). In horizontal
+  // cabins the labels sit ABOVE the fuselage next to the divider (near the safety-card style).
+  // In vertical (phone) cabins the labels are drawn INSIDE the section-start cell with a small
+  // paper-background pill so they read against seats without shrinking the cabin. Row numbers
+  // keep going across dividers either way.
+  if (!g.sectionDividers || g.sectionDividers.length === 0) return;
+  const fontPx = g.sectionDividers[0].labelFontPx || 10;
+  const gutter = g.sectionDividers[0].labelGutterPx || 5;
+  const fuselage = g.fuselage;
+  ctx.save();
+  ctx.font = `500 ${fontPx}px ${THEME.fontFamily}`;
+  ctx.textBaseline = 'middle';
+  const dividerList = g.sectionDividers;
+  const foreLabelText = dividerList[0] && dividerList[0].foreLabel;
+  const foreLongAt = g.horizontal ? fuselage.x : fuselage.y;
+  drawOneSectionLabel(ctx, g, foreLabelText, foreLongAt, fuselage, gutter, fontPx, /* isFore */ true);
+  for (const divider of dividerList) {
+    if (!divider.aftLabel) continue;
+    drawOneSectionLabel(ctx, g, divider.aftLabel, divider.longAt, fuselage, gutter, fontPx, false);
+  }
+  ctx.restore();
+}
+
+function drawOneSectionLabel(ctx, g, text, longAt, fuselage, gutter, fontPx, isFore) {
+  if (!text) return;
+  if (g.horizontal) {
+    // Ink label in light gray sitting above the fuselage next to the divider (or the fuselage
+    // fore corner for the first section).
+    ctx.fillStyle = THEME.ink;
+    ctx.globalAlpha = 0.55;
+    ctx.textAlign = 'left';
+    const x = isFore ? longAt + 4 : longAt + gutter;
+    const y = fuselage.y - gutter - fontPx / 2;
+    ctx.fillText(text, x, y);
+    ctx.globalAlpha = 1;
+    return;
+  }
+  // Vertical (phone) mode: the divider is a horizontal line spanning the fuselage width. Draw
+  // a small paper-filled pill at the CROSS-CENTER of the fuselage over the divider start so
+  // the label sits on top of the seat lattice cleanly instead of running into a seat rect.
+  ctx.textAlign = 'center';
+  const centreX = fuselage.x + fuselage.width / 2;
+  const centreY = longAt + fontPx / 2 + 4;
+  const width = ctx.measureText(text).width + 8;
+  const height = fontPx + 4;
+  ctx.fillStyle = THEME.paper;
+  const pillX = centreX - width / 2;
+  const pillY = centreY - height / 2;
+  ctx.beginPath();
+  const r = height / 2;
+  ctx.moveTo(pillX + r, pillY);
+  ctx.lineTo(pillX + width - r, pillY);
+  ctx.quadraticCurveTo(pillX + width, pillY, pillX + width, pillY + r);
+  ctx.lineTo(pillX + width, pillY + height - r);
+  ctx.quadraticCurveTo(pillX + width, pillY + height, pillX + width - r, pillY + height);
+  ctx.lineTo(pillX + r, pillY + height);
+  ctx.quadraticCurveTo(pillX, pillY + height, pillX, pillY + height - r);
+  ctx.lineTo(pillX, pillY + r);
+  ctx.quadraticCurveTo(pillX, pillY, pillX + r, pillY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = THEME.rule;
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+  ctx.fillStyle = THEME.ink;
+  ctx.globalAlpha = 0.7;
+  ctx.fillText(text, centreX, centreY);
+  ctx.globalAlpha = 1;
 }
 
 function drawPassengers(ctx, g, passengers) {
