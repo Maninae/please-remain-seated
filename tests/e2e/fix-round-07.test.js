@@ -117,7 +117,7 @@ test('rankings knob snap label: matches the loaded cell, flags fallback', async 
 /**
  * The deck lede must read the seed count from the index, never a hardcoded "thousands".
  */
-test('rankings deck reads the seed count from the index', async (t) => {
+test('rankings deck reads the seed count from the displayed cell (never from a plan)', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
@@ -125,10 +125,21 @@ test('rankings deck reads the seed count from the index', async (t) => {
     const page = await context.newPage();
     await page.goto(`${BASE_URL}/index.html?tab=rankings&seed=deck-1`, { waitUntil: 'load' });
     await page.waitForSelector('[data-rankings-lede]');
+    await page.waitForSelector('[data-rankings-footnote]');
     await page.waitForTimeout(1500);
-    const lede = await page.$eval('[data-rankings-lede]', (el) => el.textContent);
-    assert.ok(!/thousands/i.test(lede), `deck must not claim "thousands" when running the preview: "${lede}"`);
-    assert.ok(/\d{1,3}(,\d{3})*\s+times/.test(lede), `deck should quote a real number of runs: "${lede}"`);
+    // Round-05 N5-B1: the deck and the provenance footer MUST agree on the run count.
+    // We read both, extract the number of runs from each, and assert equality.
+    const { lede, footnote } = await page.evaluate(() => ({
+      lede: document.querySelector('[data-rankings-lede]')?.textContent || '',
+      footnote: document.querySelector('[data-rankings-footnote]')?.textContent || '',
+    }));
+    assert.ok(!/thousands/i.test(lede), `deck must not claim "thousands": "${lede}"`);
+    const ledeMatch = lede.match(/(\d{1,3}(?:,\d{3})*)\s+times/);
+    const footMatch = footnote.match(/(\d{1,3}(?:,\d{3})*)\s+runs/);
+    assert.ok(ledeMatch, `deck should print a run count: "${lede}"`);
+    assert.ok(footMatch, `footnote should print a run count: "${footnote}"`);
+    assert.equal(ledeMatch[1], footMatch[1],
+      `deck run count "${ledeMatch[1]}" must match footnote "${footMatch[1]}" (N5-B1)`);
   } finally {
     await browser.close();
   }
@@ -181,22 +192,28 @@ test('phone finding sentence wraps to multiple lines, no mid-word ellipsis', asy
     const context = await browser.newContext({ viewport: { width: 400, height: 800 } });
     const page = await context.newPage();
     await page.goto(`${BASE_URL}/index.html?tab=rankings&mode=board&seed=wrap-1`, { waitUntil: 'load' });
-    await page.waitForSelector('.rankings-chart-svg-host svg');
+    // Round-05 hierarchy change: the finding sentence moved out of the SVG title and became
+    // an HTML hero element. Check THAT element for ellipsis instead.
+    await page.waitForSelector('[data-rankings-finding]');
     await page.waitForTimeout(2000);
     const state = await page.evaluate(() => {
-      const svg = document.querySelector('.rankings-chart-svg-host svg');
-      if (!svg) return null;
-      const texts = [...svg.querySelectorAll('text')].map((el) => el.textContent).filter(Boolean);
-      // Title lines are the first ones drawn (font-weight 600). Take the first two candidate
-      // lines as the title chunk.
-      const titleTexts = texts.slice(0, 4);
-      return { titleTexts };
+      const el = document.querySelector('[data-rankings-finding]');
+      if (!el) return null;
+      const style = window.getComputedStyle(el);
+      return {
+        text: el.textContent || '',
+        fontSize: parseFloat(style.fontSize),
+        clientHeight: el.clientHeight,
+        clientWidth: el.clientWidth,
+      };
     });
-    assert.ok(state, 'chart svg should exist');
-    // No ellipsis on any of the title lines: the reader must never be cut off mid-word.
-    for (const line of state.titleTexts) {
-      assert.ok(!/[…]/.test(line), `title line must not carry an ellipsis: "${line}"`);
-    }
+    assert.ok(state, 'finding element should exist');
+    assert.ok(state.text.length > 20, `finding sentence should be present, got "${state.text}"`);
+    assert.ok(!/[…]/.test(state.text), `finding must not carry an ellipsis: "${state.text}"`);
+    // The finding wraps to at least 2 lines on a phone (font-size × ~1.25 line-height × 2).
+    const singleLineHeightPx = state.fontSize * 1.3;
+    assert.ok(state.clientHeight > singleLineHeightPx,
+      `finding should wrap on 400px viewport: fontSize=${state.fontSize}, height=${state.clientHeight}`);
   } finally {
     await browser.close();
   }

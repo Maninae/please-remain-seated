@@ -371,7 +371,14 @@ function refreshGenerationLine(info, root) {
     ? date.toISOString().slice(0, 10)
     : info.generatedAt || 'unknown';
   const sha = info.engineVersion ? info.engineVersion.slice(0, 12) : 'unknown';
-  const runs = info.seedTiers?.headline || info.seeds || null;
-  const runsPart = runs ? ` Each cell holds ${runs.toLocaleString('en-US')} runs per strategy.` : '';
+  // N5-B1: state the tiers HONESTLY, computed from the index cells themselves. The old code
+  // read seedTiers.headline (a plan number) and printed "10,000" while cells on disk carried
+  // 200 or 2,000. The summary sentence describes what actually shipped.
+  const summary = info.seedTierSummary && info.seedTierSummary.sentence
+    ? info.seedTierSummary.sentence
+    : (info.seeds
+      ? `Each cell holds ${info.seeds.toLocaleString('en-US')} runs per strategy.`
+      : '');
+  const runsPart = summary ? ` ${summary}` : '';
   el.textContent = `Rankings data generated ${dateStr} with engine ${sha}.${runsPart}`;
 }

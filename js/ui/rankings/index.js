@@ -76,15 +76,15 @@ export function mountRankingsTab({ store }) {
     state.preview = result.preview;
     state.loaded = true;
     setStatus(panel, '');
-    updateLedeFromIndex(panel, state.indexObject);
     populatePresetSelect(state.indexObject);
     // Announce the load so the About tab (and anyone else) picks up the generation date
-    // without kicking off a second fetch.
+    // and the honest tier summary computed from the index cells themselves.
     window.dispatchEvent(new CustomEvent('prs:rankings-index-loaded', {
       detail: {
         generatedAt: result.indexObject.generatedAt,
         engineVersion: result.indexObject.engineVersion,
         seedTiers: result.indexObject.seedTiers,
+        seedTierSummary: computeSeedTierSummary(result.indexObject),
         preview: result.indexObject.preview,
       },
     }));
@@ -103,9 +103,12 @@ export function mountRankingsTab({ store }) {
     const key = `${cellRef.cell.id}::${request.exact ? 'exact' : 'fallback'}`;
     if (key === state.lastRenderKey && state.currentCellData) {
       // Still re-render controls (labels, nearest-run text may have changed).
+      updateLedeForCell(panel, state.currentCellData);
       renderTop(panel, request, state.currentCellRef || cellRef);
-      renderStats(panel, state.currentCellData, request.mode);
+      renderHeroFinding(panel, state.currentCellData, request.mode);
       renderChart(panel, state.currentCellData, request, state.currentCellRef || cellRef);
+      renderChartCaveat(panel, state.currentCellData, request.mode);
+      renderStats(panel, state.currentCellData, request.mode);
       await renderSensitivity(panel, state.currentCellData, request);
       return;
     }
@@ -136,9 +139,14 @@ export function mountRankingsTab({ store }) {
     state.currentCellData = loaded.cellData;
     state.currentCellRef = effectiveRef;
     setStatus(panel, '');
+    // Update the deck lede FIRST, using the cell that actually loaded, so the deck can never
+    // print a seed count the footer nine inches down would refute (N5-B1).
+    updateLedeForCell(panel, loaded.cellData);
     renderTop(panel, request, effectiveRef);
-    renderStats(panel, loaded.cellData, request.mode);
+    renderHeroFinding(panel, loaded.cellData, request.mode);
     renderChart(panel, loaded.cellData, request, effectiveRef);
+    renderChartCaveat(panel, loaded.cellData, request.mode);
+    renderStats(panel, loaded.cellData, request.mode);
     await renderSensitivity(panel, loaded.cellData, request);
   }
 
@@ -229,7 +237,7 @@ function buildScaffold(panel) {
       <header class="rankings-header">
         <div class="rankings-header-text">
           <h2 class="rankings-title">Rankings from many random planes</h2>
-          <p class="rankings-lede" data-rankings-lede>Every strategy, run many times, sorted by how long it takes at these settings. Ticks along the top mark real airline and study times for the same aircraft class.</p>
+          <p class="rankings-lede" data-rankings-lede>Sorted by how long it takes at these settings. Ticks along the top mark real airline and study times.</p>
         </div>
         <div class="rankings-controls">
           <div class="rankings-toggle" role="radiogroup" aria-label="Simulation mode">
@@ -244,9 +252,11 @@ function buildScaffold(panel) {
       </header>
       <p class="rankings-status" data-rankings-status></p>
       <div class="rankings-knob-notes" data-rankings-knob-notes></div>
-      <div class="rankings-stats" data-rankings-stats></div>
+      <p class="rankings-finding" data-rankings-finding></p>
       <div class="rankings-chart-wrap" data-rankings-chart></div>
+      <p class="rankings-chart-caveat" data-rankings-chart-caveat></p>
       <div class="rankings-hover-detail" data-rankings-hover></div>
+      <div class="rankings-stats" data-rankings-stats></div>
       <section class="rankings-sensitivity-section">
         <h3 class="rankings-sensitivity-heading">
           Sensitivity: how the rankings move with each knob
@@ -363,8 +373,20 @@ function renderTop(panel, request, cellRef) {
   const footnote = panel.querySelector('[data-rankings-footnote]');
   if (footnote) {
     footnote.innerHTML = '';
+    // Round-04 N4-n6 carried: the id string is developer output that wraps into a wall of
+    // double underscores on phone. Print a plain-language summary a reader can parse, and
+    // keep the id in a hidden data attribute for anyone debugging.
     const cellData = cellRef.cell;
-    footnote.textContent = `Cell: ${cellData.id}. ${cellData.seeds.toLocaleString('en-US')} runs per strategy.`;
+    const runs = cellData.seeds.toLocaleString('en-US');
+    const kn = cellData.knobs || {};
+    const parts = [];
+    if (typeof kn.load === 'number') parts.push(`load ${Math.round(kn.load * 100)}%`);
+    if (typeof kn.compliance === 'number') parts.push(`compliance ${Math.round(kn.compliance * 100)}%`);
+    if (typeof kn.groups === 'number') parts.push(`groups ${Math.round(kn.groups * 100)}%`);
+    if (kn.bags) parts.push(kn.bags === 'default' ? 'typical bags' : `${kn.bags} bags`);
+    if (kn.bins) parts.push(kn.bins === 'legacy' ? 'old-style bins' : 'roomy bins');
+    footnote.textContent = `${runs} runs per strategy, ${parts.join(', ')}.`;
+    footnote.setAttribute('data-cell-id', cellData.id);
   }
 }
 
@@ -426,20 +448,84 @@ function valuesEqual(a, b) {
   return a === b;
 }
 
-// Rewrite the lede sentence to state the true seed count from the index. Preview builds land
-// at 200 runs per strategy today; the deck reads "many times" until this fires, then reads the
-// real number so it becomes true for free when the full precompute lands.
-function updateLedeFromIndex(panel, indexObject) {
+// Rewrite the lede sentence to state the SEED COUNT of the CELL ACTUALLY DISPLAYED. Round-05
+// blocker N5-B1: the previous version read seedTiers.headline (a plan number), so the deck
+// said "10,000" while the footer for the same cell said "200". The deck now reads the cell's
+// own seeds so the deck can never contradict the footer nine inches below.
+function updateLedeForCell(panel, cellData) {
   const lede = panel.querySelector('[data-rankings-lede]');
   if (!lede) return;
-  const tier = indexObject?.seedTiers || {};
-  const headline = tier.headline || tier.small || tier.preview || null;
-  if (!Number.isFinite(headline)) return;
-  const runs = headline.toLocaleString('en-US');
-  const label = indexObject.preview
-    ? `Every strategy, run ${runs} times per cell (preview build). Sorted by how long it takes at these settings.`
-    : `Every strategy, run ${runs} times per cell. Sorted by how long it takes at these settings.`;
-  lede.textContent = `${label} Ticks along the top mark real airline and study times for the same aircraft class.`;
+  const seeds = Number.isFinite(cellData?.seeds) ? cellData.seeds : (cellData?.cell?.seeds || null);
+  if (!Number.isFinite(seeds)) return;
+  const runs = seeds.toLocaleString('en-US');
+  lede.textContent = `Every strategy, run ${runs} times for this cell. Sorted by how long it takes at these settings. Ticks along the top mark real airline and study times.`;
+}
+
+/**
+ * Build an honest tier summary from the CELLS in the index (never seedTiers.headline alone).
+ * Groups cells by (kind, seeds); if some cells are 10,000-seed headlines and others are
+ * 2,000-seed sensitivity, we say so. When every cell is the same seed count we say it once.
+ * Used by the About tab so the tiers on that page match what actually shipped in data/.
+ */
+export function computeSeedTierSummary(indexObject) {
+  if (!indexObject || !Array.isArray(indexObject.cells)) return null;
+  const seedsByKind = new Map();      // kind -> Map(seeds -> count)
+  for (const cell of indexObject.cells) {
+    const kind = cell.kind || 'headline';
+    const seeds = Number.isFinite(cell.seeds) ? cell.seeds : null;
+    if (seeds === null) continue;
+    if (!seedsByKind.has(kind)) seedsByKind.set(kind, new Map());
+    const bucket = seedsByKind.get(kind);
+    bucket.set(seeds, (bucket.get(seeds) || 0) + 1);
+  }
+  // Reduce each kind to its single dominant seed count (if any), and remember the modes.
+  const kindStats = {};
+  const seedTotals = new Map();
+  for (const [kind, bucket] of seedsByKind) {
+    let bestSeeds = null;
+    let bestCount = 0;
+    for (const [seeds, count] of bucket) {
+      seedTotals.set(seeds, (seedTotals.get(seeds) || 0) + count);
+      if (count > bestCount) { bestSeeds = seeds; bestCount = count; }
+    }
+    kindStats[kind] = { seeds: bestSeeds, count: bestCount };
+  }
+  const distinctSeeds = [...seedTotals.keys()].sort((a, b) => b - a);
+  return {
+    perKind: kindStats,
+    distinctSeeds,
+    dominant: distinctSeeds[0] || null,
+    // A short one-line description a caller (About tab) can just print.
+    sentence: buildTierSentence(kindStats, distinctSeeds, seedTotals),
+  };
+}
+
+function buildTierSentence(kindStats, distinctSeeds, seedTotals) {
+  const fmt = (n) => n.toLocaleString('en-US');
+  if (distinctSeeds.length === 0) return 'Runs per strategy will appear once the precompute finishes.';
+  if (distinctSeeds.length === 1) {
+    const seeds = distinctSeeds[0];
+    const total = seedTotals.get(seeds);
+    return `Every cell holds ${fmt(seeds)} runs per strategy across ${fmt(total)} cell${total === 1 ? '' : 's'}.`;
+  }
+  // Multiple distinct seed counts: describe the biggest tier and the rest by kind.
+  const parts = [];
+  const headline = kindStats.headline;
+  const sensitivity = kindStats.sensitivity;
+  if (headline?.seeds) {
+    parts.push(`${fmt(headline.seeds)} runs per strategy for ${fmt(headline.count)} headline preset${headline.count === 1 ? '' : 's'}`);
+  }
+  if (sensitivity?.seeds) {
+    if (headline?.seeds && sensitivity.seeds === headline.seeds) {
+      parts.push(`${fmt(sensitivity.count)} sensitivity cell${sensitivity.count === 1 ? '' : 's'} at the same count`);
+    } else {
+      parts.push(`${fmt(sensitivity.seeds)} for the ${fmt(sensitivity.count)} sensitivity cell${sensitivity.count === 1 ? '' : 's'}`);
+    }
+  }
+  if (parts.length === 0) {
+    return `Runs per strategy range from ${fmt(distinctSeeds[distinctSeeds.length - 1])} to ${fmt(distinctSeeds[0])} per cell.`;
+  }
+  return `${parts.join('; ')}.`;
 }
 
 function renderStats(panel, cellData, mode) {
@@ -467,13 +553,14 @@ function renderChart(panel, cellData, request, cellRef) {
     preset: request.preset,
     passengerCount: cellData.passengerCount || 0,
   });
-  const findingSentence = composeFinding(cellData, request.mode);
+  // The finding sentence is now the hero above the chart; the chart draws WITHOUT its own
+  // title so the reader's eye lands on the HTML sentence once, not twice (N5-M2).
   const { hitTargets } = renderRankingsChart(svgEl, {
     strategies: cellData.strategies,
     anchors,
     mode: request.mode,
     cell: cellRef.cell,
-    findingSentence,
+    findingSentence: '',
   });
 
   if (hoverHost) {
@@ -481,6 +568,33 @@ function renderChart(panel, cellData, request, cellRef) {
     wireHoverPanel(svgEl, hoverHost, cellData, hitTargets);
   }
   void cellRef;
+}
+
+/**
+ * Draw the finding sentence as the hero of the tab: the largest text on the page, directly
+ * under the mode toggle, above the chart. Was previously a 15 px SVG title under 40 px stat
+ * tiles; N5-M2 promotes it to type-scale hero so the eye lands here first.
+ */
+function renderHeroFinding(panel, cellData, mode) {
+  const host = panel.querySelector('[data-rankings-finding]');
+  if (!host) return;
+  const sentence = composeFinding(cellData, mode);
+  host.textContent = sentence || '';
+  host.hidden = !sentence;
+}
+
+/**
+ * The critic's N5-m10 asked for the range-of-validity note under the ranked chart, so a
+ * reader looking at the off-scale front-to-back row sees the caveat. We only print it in
+ * BOARD mode where the tail extrapolation actually applies.
+ */
+function renderChartCaveat(panel, cellData, mode) {
+  const host = panel.querySelector('[data-rankings-chart-caveat]');
+  if (!host) return;
+  if (mode !== 'board') { host.textContent = ''; host.hidden = true; return; }
+  host.textContent = 'The extremes of this ranking are extrapolation: front-to-back runs slower here than field data (about 3.8 pax/min in the sim, against 7 pax/min in the MythBusters back-to-front test), and every simulated airline procedure lands at or above the Spirit 20-minute anchor. The middle of the list is where the story lives.';
+  host.hidden = false;
+  void cellData;
 }
 
 /**
@@ -510,6 +624,9 @@ function composeFinding(cellData, mode) {
         const savedMin = Math.floor(savedSeconds / 60);
         const savedSec = Math.round(savedSeconds - savedMin * 60);
         const savedText = savedMin > 0 ? `${savedMin}:${savedSec < 10 ? '0' : ''}${savedSec}` : `${Math.round(savedSeconds)} seconds`;
+        // The finding sentence uses "within a minute of random". The under-chart caption
+        // names the largest sliding-window tie among airlines (a different rule). Both
+        // numbers are honest; the caption spells the second rule out (N5-m3).
         return `${tiedAgainstRandom.length} of ${airline.length} airline procedures board ${aircraft} within a minute of random order. ${bestTextbook.label} saves about ${savedText} against random.`;
       }
     }

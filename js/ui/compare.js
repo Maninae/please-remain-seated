@@ -196,7 +196,9 @@ export function mountCompare({ store, race }) {
     const anySeeds = (textbookResults[0] || airlineResults[0] || {}).totalSeconds || [];
     const note = document.createElement('p');
     note.className = 'compare-timing';
-    note.textContent = `${totalRows} strategies · ${anySeeds.length} seeds · ${(elapsedMs / 1000).toFixed(1)}s`;
+    // Round-05 N5-n6: match the vocabulary of the "Runs" control above (was "seeds"), so the
+    // reader sees one word for the same concept.
+    note.textContent = `${totalRows} strategies · ${anySeeds.length} runs · ${(elapsedMs / 1000).toFixed(1)}s`;
     stripsWrap.appendChild(note);
   }
 }

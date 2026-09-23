@@ -1,8 +1,14 @@
 /*
- * Rankings tab layout: header, mode toggle + preset select, knob notes, stat tiles, ranked
- * chart, sensitivity slope grid, footnote. Every chart is code-drawn SVG (inline elements
- * created by rankings-chart.js and rankings-sensitivity.js), so this file only handles the
- * enclosing chrome and the responsive stack.
+ * Rankings tab layout: header, mode toggle + preset select, knob notes, HERO finding sentence,
+ * ranked chart, chart caveat, hover strip, compact stat row + comparison rows, sensitivity
+ * slope grid, footnote. Every chart is code-drawn SVG (inline elements created by
+ * rankings-chart.js and rankings-sensitivity.js), so this file only handles the enclosing
+ * chrome and the responsive stack.
+ *
+ * Round-05 hierarchy (N5-M2): the computed finding sentence is the largest text on the tab,
+ * placed directly after the mode toggle above the chart. The four stat tiles now sit AFTER
+ * the chart as a compact one-line-per-tile row of secondary numbers, so nothing on the tab
+ * competes with the sentence except the chart itself.
  */
 
 .rankings-tab {
@@ -164,22 +170,46 @@
   color: var(--ink-muted);
 }
 
-/* ----- Stat tiles ----- */
+/* ----- Hero finding sentence (N5-M2) ----- */
+
+.rankings-finding {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: clamp(20px, 2.8vw, 30px);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  max-width: 62ch;
+}
+.rankings-finding:empty { display: none; }
+
+.rankings-chart-caveat {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-style: italic;
+  max-width: 78ch;
+}
+.rankings-chart-caveat:empty,
+.rankings-chart-caveat[hidden] { display: none; }
+
+/* ----- Stat tiles: compact secondary row (N5-M2) ----- */
 
 .rankings-stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .rankings-stat-tile {
   background: var(--paper);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-l);
-  padding: 14px 16px 16px;
+  border-radius: var(--radius-m);
+  padding: 8px 10px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 .rankings-stat-header {
@@ -189,7 +219,7 @@
   gap: 6px;
 }
 .rankings-stat-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--ink-muted);
   text-transform: uppercase;
@@ -197,27 +227,36 @@
 }
 .rankings-stat-number {
   font-variant-numeric: tabular-nums;
-  font-size: clamp(28px, 4vw, 40px);
-  font-weight: 700;
+  /* Downshifted from 40 px hero to a compact secondary weight. Nothing on this tab is
+   * larger than the finding sentence except the chart itself (N5-M2). */
+  font-size: 18px;
+  font-weight: 600;
   color: var(--ink);
-  line-height: 1.05;
-  margin-top: 4px;
+  line-height: 1.1;
+  margin-top: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rankings-stat-unit {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rankings-stat-sublabel {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--ink-muted);
   border-top: 1px dashed var(--rule);
-  padding-top: 4px;
-  margin-top: 6px;
+  padding-top: 3px;
+  margin-top: 4px;
 }
 .rankings-stats-sub {
   margin: 0;
-  color: var(--ink);
-  font-size: 14px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-style: italic;
 }
 
 /*
@@ -252,6 +291,16 @@
   font-size: 14px;
   white-space: nowrap;
 }
+/* Emphasize the "average airline vs random order" row: it is the whole thesis as a number. */
+.rankings-comparison-row-emphasize {
+  background: var(--paper-2);
+}
+.rankings-comparison-row-emphasize .rankings-comparison-head {
+  font-size: 14px;
+}
+.rankings-comparison-row-emphasize .rankings-comparison-value {
+  font-size: 16px;
+}
 .rankings-stats-comparisons-note {
   margin: 0;
   font-size: 11px;
@@ -276,6 +325,11 @@
 @media (max-width: 480px) {
   .rankings-stats-grid { grid-template-columns: 1fr; }
 }
+
+/* Anchor labels: pointer cursor set here (not inline) so index.html can ship with a strict
+ * Content-Security-Policy that forbids inline styles (security-round-01 n1). */
+.rankings-anchor-clickable { cursor: pointer; }
+.rankings-anchor-label { cursor: default; }
 
 /* ----- Ranked chart ----- */
 

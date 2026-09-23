@@ -22,7 +22,7 @@ import { createCabinView } from '../render/cabin-view.js';
 import { createRaceLoop } from './race-loop.js';
 import { drawTimeSplitLanes } from './time-split.js';
 import { snapshotForRender } from './snapshot.js';
-import { formatClock } from './format.js';
+import { formatClock, makeReadableSeed } from './format.js';
 import { buildRaceSims, buildDeplaneFromBoarded } from './race-sims.js';
 import { canvasHeightForCabin } from './canvas-sizing.js';
 import { viewportOrientation, readLaneNodes } from './race-helpers.js';
@@ -93,7 +93,7 @@ export function mountRace({ store, onFinish }) {
     togglePlay: () => (loop.isRunning() ? loop.pause() : loop.start()),
     restart,
     newSeed(seed) {
-      const nextSeed = seed || `plane-${Math.floor(Math.random() * 1e6).toString(36)}`;
+      const nextSeed = seed || makeReadableSeed();
       store.update({ seed: nextSeed });
     },
     setSpeed(next) { loop.setSpeed(next); store.update({ speed: next }); },

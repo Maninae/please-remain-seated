@@ -40,7 +40,7 @@ export function drawTimeSplitLanes({ lanes, mode = 'deplane' }) {
     if (d.lane.labelNode) d.lane.labelNode.textContent = d.strategyLabel;
     if (d.lane.captionNode) d.lane.captionNode.textContent = d.caption ? ` · ${d.caption}` : '';
     if (d.lane.totalNode) d.lane.totalNode.textContent = d.total > 0 ? `total ${formatClock(d.total)}` : '';
-    const result = renderTimeSplit(d.lane.svg, d.split, { width, scaleTotal });
+    const result = renderTimeSplit(d.lane.svg, d.split, { width, scaleTotal, mode });
     renderBelowLabels(d.lane.belowLabelsNode, result && result.belowLabels ? result.belowLabels : []);
   }
 }

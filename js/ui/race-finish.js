@@ -255,11 +255,11 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
       }
       const payload = { fractions, worstKey: heatOn ? worstKey : null, worstLabel: heatOn ? worstLabel : '' };
       if (laneViews[i] && laneViews[i].setHeat) laneViews[i].setHeat(heatOn ? payload : null);
-      renderHeatCaption(i, { bestLabel, worstLabel, hasHeat: heatOn });
+      renderHeatCaption(i, { bestLabel, worstLabel, hasHeat: heatOn, sharedMax });
     }
   }
 
-  function renderHeatCaption(laneIndex, { bestLabel, worstLabel, hasHeat }) {
+  function renderHeatCaption(laneIndex, { bestLabel, worstLabel, hasHeat, sharedMax }) {
     const legend = laneNodes[laneIndex].legend;
     if (!legend) return;
     if (!hasHeat) {
@@ -270,9 +270,14 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
     }
     legend.classList.add('heat-caption');
     legend.setAttribute('aria-hidden', 'false');
+    // Round-05 N5-m6 (carried N4-m11): the endpoints were the words "short" and "long", so
+    // the shared ramp had no numeric scale visible. Print the shared max on the "long" end
+    // and a plain zero on the "short" end. Both lanes then read against the same numeric
+    // scale, and the caption below says so explicitly.
+    const scaleMax = Number.isFinite(sharedMax) && sharedMax > 0 ? formatClock(sharedMax) : 'long';
     legend.innerHTML = `
-      <span class="heat-ramp"><span class="end">short</span><span class="bar"></span><span class="end">long</span></span>
-      <span class="heat-caption-text">Darker = longer aboard. Worst ${escapeHtml(worstLabel)}; best ${escapeHtml(bestLabel)}.</span>
+      <span class="heat-ramp"><span class="end">0:00</span><span class="bar"></span><span class="end">${escapeHtml(scaleMax)}</span></span>
+      <span class="heat-caption-text">Darker = more time aboard from door open. Both cabins share this scale. Worst ${escapeHtml(worstLabel)}; best ${escapeHtml(bestLabel)}.</span>
     `;
   }
 

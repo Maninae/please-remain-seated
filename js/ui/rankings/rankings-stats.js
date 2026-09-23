@@ -37,10 +37,13 @@ function fmtInt(value) {
 }
 
 function fmtPersonYears(value) {
-  if (!Number.isFinite(value) || value <= 0) return '0';
-  if (value >= 100) return Math.round(value).toLocaleString('en-US');
-  if (value >= 10) return value.toFixed(1);
-  return value.toFixed(2);
+  if (!Number.isFinite(value) || value <= 0) return '0.0';
+  if (value >= 1000) return Math.round(value).toLocaleString('en-US');
+  // N5-M6: consistent precision within the comparison column. The old rule flipped from two
+  // decimals at value < 10 to one decimal at value >= 10, so 8.79 and 26.6 and 26.5 landed
+  // in the same column at different precisions. One decimal everywhere below 1000 keeps the
+  // column columnar.
+  return value.toFixed(1);
 }
 
 function fmtClock(seconds) {
@@ -123,15 +126,27 @@ export function renderStatTiles(host, { strategies, mode, passengerCount }) {
   }));
   host.appendChild(grid);
 
-  // Below-tiles honest comparison rows. Boarding gets three; deplaning gets one summary line
-  // pointing to the "best vs slowest" reading already in the tile row.
+  // Below-tiles honest comparison rows. Boarding gets FOUR (round-05 N5-M6 asked for the
+  // "average airline vs random order" row that carries the whole thesis); deplaning gets no
+  // comparison rows because there is no airline family to compare against.
   if (mode === 'board' && refs.bestTextbook && refs.random && refs.bestAirline && refs.averageAirlineIdle != null) {
     const compGrid = document.createElement('div');
     compGrid.className = 'rankings-stats-comparisons';
     const bestTextbookYears = personYearsFromPersonMinutes(Math.max(0, refs.random.idlePersonMinutesMedian - refs.bestTextbook.idlePersonMinutesMedian));
     const bestAirlineYears = personYearsFromPersonMinutes(Math.max(0, refs.random.idlePersonMinutesMedian - refs.bestAirline.idlePersonMinutesMedian));
     const airlineGapYears = personYearsFromPersonMinutes(Math.max(0, refs.averageAirlineIdle - refs.bestTextbook.idlePersonMinutesMedian));
+    // N5-M6: this is the sentence version of the whole tab, rendered as a number for the
+    // first time. The delta can be positive or negative depending on which direction the
+    // mean airline lies.
+    const avgAirlineVsRandom = Math.max(0, refs.random.idlePersonMinutesMedian - refs.averageAirlineIdle);
+    const avgAirlineVsRandomYears = personYearsFromPersonMinutes(avgAirlineVsRandom);
     for (const row of [
+      {
+        head: 'Average airline vs random order',
+        detail: `${refs.averageAirlineCount} airline procedures, mean idle vs ${refs.random.label} · the whole thesis, as a number`,
+        value: `${fmtPersonYears(avgAirlineVsRandomYears)} person-years / day`,
+        emphasize: true,
+      },
       {
         head: 'Best textbook method vs random order',
         detail: `${refs.bestTextbook.label} vs ${refs.random.label}`,
@@ -208,9 +223,10 @@ function tile({ label, subLabel, value, unit, subUnit, infoKey, dataAttrs }) {
   return wrap;
 }
 
-function comparisonRow({ head, detail, value }) {
+function comparisonRow({ head, detail, value, emphasize }) {
   const row = document.createElement('div');
   row.className = 'rankings-comparison-row';
+  if (emphasize) row.classList.add('rankings-comparison-row-emphasize');
   const left = document.createElement('div');
   left.className = 'rankings-comparison-text';
   const headEl = document.createElement('span');

@@ -24,6 +24,30 @@ export function formatPercent(value) {
   return `${Math.round(value * 100)}%`;
 }
 
+// Readable seed generator. N4-n1 (carried into round-05 as N5-n1): the old base-36 seeds
+// (`plane-aonp`, `plane-6bvj`) looked like random noise. A two-word seed built from short
+// aviation nouns and colours is memorable, shareable, and still unique enough that a couple
+// of pushes back to back rarely collide. The word lists stay short on purpose so the seed
+// remains readable at a glance.
+const SEED_ADJECTIVES = Object.freeze([
+  'amber', 'blue', 'brass', 'copper', 'coral', 'dawn', 'drift', 'dusk',
+  'ember', 'fog', 'gold', 'gray', 'iron', 'jade', 'ivory', 'lime',
+  'mist', 'navy', 'olive', 'onyx', 'plum', 'quiet', 'ruby', 'sable',
+  'silver', 'slate', 'smoke', 'stone', 'storm', 'teal',
+]);
+const SEED_NOUNS = Object.freeze([
+  'aisle', 'apron', 'ascent', 'bank', 'bay', 'beacon', 'bridge', 'cabin',
+  'cloud', 'crew', 'deck', 'exit', 'gate', 'glide', 'hangar', 'horizon',
+  'jet', 'lane', 'row', 'runway', 'seat', 'sky', 'sunrise', 'sunset',
+  'tail', 'taxi', 'terminal', 'tower', 'wing', 'yaw',
+]);
+
+export function makeReadableSeed(rand = Math.random) {
+  const a = SEED_ADJECTIVES[Math.floor(rand() * SEED_ADJECTIVES.length)];
+  const n = SEED_NOUNS[Math.floor(rand() * SEED_NOUNS.length)];
+  return `plane-${a}-${n}`;
+}
+
 export function findingSentenceFor(mode, results, racingIds) {
   // Compose the one-line finding used as the strips title. Passes through the ordered results
   // (sorted by median ascending) and the two racing ids so the sentence talks about them by name.

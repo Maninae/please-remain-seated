@@ -103,7 +103,10 @@ function renderOneSlope(knob, cells, topFive, defaults) {
 
   const allYs = series.flatMap((s) => s.values.filter((v) => v !== null));
   const yMax = niceCeiling(Math.max(...allYs, 60));
-  const yMin = 0;
+  // N5-M4: sensitivity panels used to start at 0 too, compressing five near-flat lines into
+  // the top third of each frame. Start the axis at the fastest data point minus a small
+  // breather so the lines span the plot instead of hugging its ceiling.
+  const yMin = computeSlopeFloor(allYs, yMax);
   const plotX0 = PADDING.left;
   const plotX1 = width - PADDING.right;
   const plotY0 = PADDING.top;
@@ -139,8 +142,11 @@ function renderOneSlope(knob, cells, topFive, defaults) {
     }
   }
 
-  // Y axis ticks (0, mid, max minutes).
-  const yTicks = [yMax, yMax / 2, 0];
+  // Y axis ticks: floor, midpoint, cap. When the floor sits above zero, the small italic
+  // note tells the reader the plot is truncated so a near-flat line reads as small change,
+  // not as zero.
+  const midSeconds = yMin + (yMax - yMin) / 2;
+  const yTicks = yMin > 0 ? [yMax, midSeconds, yMin] : [yMax, yMax / 2, 0];
   for (const seconds of yTicks) {
     const y = plotY1 - (seconds - yMin) / (yMax - yMin) * (plotY1 - plotY0);
     appendText(svg, {
@@ -150,6 +156,16 @@ function renderOneSlope(knob, cells, topFive, defaults) {
       fill: THEME.ink,
       'fill-opacity': 0.55,
     }, `${Math.round(seconds / 60)}m`);
+  }
+  if (yMin > 0) {
+    appendText(svg, {
+      x: plotX0 - 8, y: plotY1 + 13,
+      'font-size': AXIS_FONT_PX - 1,
+      'text-anchor': 'end',
+      fill: THEME.ink,
+      'fill-opacity': 0.45,
+      'font-style': 'italic',
+    }, `axis from ${Math.round(yMin / 60)}m`);
   }
 
   // Draw lines and dots.
@@ -180,9 +196,12 @@ function renderOneSlope(knob, cells, topFive, defaults) {
     }
   }
 
-  // Right-edge labels with leader lines. If the endpoint of a series is missing (some knob's
-  // second cell did not include this strategy), fall back to the previous point.
-  const MIN_LABEL_GAP = LABEL_FONT_PX + 2;
+  // Right-edge labels with leader lines. Sort by true endpoint Y, then run a two-pass
+  // equilibrium: pass 1 pushes each label DOWN to preserve MIN_LABEL_GAP from the label
+  // above; pass 2 sweeps upward to push labels UP when the last one still collides upward.
+  // Round-05 N5-M5: the previous single-pass fix exempted the last (lowest) line from
+  // stacking, so "Both doors" always overprinted the row above it in the deplane panels.
+  const MIN_LABEL_GAP = LABEL_FONT_PX + 3;
   const rightEnds = series.map((s, i) => {
     const pts = linePoints[i];
     for (let idx = pts.length - 1; idx >= 0; idx -= 1) {
@@ -190,19 +209,27 @@ function renderOneSlope(knob, cells, topFive, defaults) {
     }
     return null;
   }).filter(Boolean).sort((a, b) => a.targetY - b.targetY);
+  // Initialize label positions to their true endpoints, then relax.
+  for (const entry of rightEnds) entry.labelY = entry.targetY;
+  // Downward pass: each label must sit at least MIN_LABEL_GAP below the previous label.
   for (let i = 1; i < rightEnds.length; i += 1) {
-    if (rightEnds[i].targetY - rightEnds[i - 1].targetY < MIN_LABEL_GAP) {
-      rightEnds[i].labelY = (rightEnds[i - 1].labelY ?? rightEnds[i - 1].targetY) + MIN_LABEL_GAP;
-    }
+    const minY = rightEnds[i - 1].labelY + MIN_LABEL_GAP;
+    if (rightEnds[i].labelY < minY) rightEnds[i].labelY = minY;
+  }
+  // Upward pass: if the last label was pushed below the plot's bottom, or if a label sits
+  // farther from its true endpoint than the one below it, pull the prior labels up.
+  for (let i = rightEnds.length - 2; i >= 0; i -= 1) {
+    const maxY = rightEnds[i + 1].labelY - MIN_LABEL_GAP;
+    if (rightEnds[i].labelY > maxY) rightEnds[i].labelY = maxY;
   }
   for (const entry of rightEnds) {
-    const labelY = entry.labelY ?? entry.targetY;
-    // Short leader line from the endpoint to the label baseline, so a label pushed off its
-    // line by the collision-fix pass still points back to its data (N4-m6).
+    const labelY = entry.labelY;
+    // Short leader line from the endpoint to the label baseline. Now drawn on every entry
+    // that moved, so the reader can trace each label back to its convergence.
     if (Math.abs(labelY - entry.targetY) > 1.5) {
       appendLine(svg, {
         x1: entry.x + 3, x2: plotX1 + 5, y1: entry.targetY, y2: labelY,
-        stroke: THEME.ink, 'stroke-opacity': 0.30, 'stroke-width': 0.6,
+        stroke: THEME.ink, 'stroke-opacity': 0.35, 'stroke-width': 0.6,
       });
     }
     appendText(svg, {
@@ -301,6 +328,16 @@ function mapStrategyById(rows) {
  * two-point knob (bins) the delta is (high - low); for a three-point knob we take (last -
  * first) as the total swing, since the middle is the default and both flanks are informative.
  */
+// N5-M3: a strategy shows a "barely moves" clause only when its total swing is under
+// SMALL_MOVE_SECONDS, matching the "under a minute" plain reading. In half the panels the
+// smallest mover swings 96 to 319 s (13 to 43 SE at n=200), which is not "barely" by any
+// definition; the clause is silently dropped in those panels.
+const SMALL_MOVE_SECONDS = 60;
+
+// N4-n9 (carried): the panel heading already prints the knob name ("How full") directly
+// above the title. Repeating it as the first two words is redundant, so we phrase the title
+// starting with the STRATEGY that moves. When the swing is too small to be interesting for
+// even the top mover, we fall back to a plain summary sentence.
 function computeSlopeTitle(knob, series, points) {
   if (!series || series.length === 0 || points.length < 2) return '';
   const firstIdx = 0;
@@ -312,12 +349,17 @@ function computeSlopeTitle(knob, series, points) {
   moves.sort((a, b) => b.delta - a.delta);
   const largest = moves[0];
   const smallest = moves[moves.length - 1];
-  const label = knobHeading(knob);
   if (largest.id === smallest.id || moves.length === 1) {
-    return `${label} moves ${truncateLabel(largest.label)} by ${formatDelta(largest.delta)}.`;
+    return `Shifts ${truncateLabel(largest.label)} by ${formatDelta(largest.delta)}.`;
   }
-  if (largest.delta < 20) return `${label} has a small effect on the top strategies.`;
-  return `${label} has the largest effect on ${truncateLabel(largest.label)}; ${truncateLabel(smallest.label)} barely moves.`;
+  if (largest.delta < 20) return 'Small effect across the top strategies.';
+  const primary = `Largest effect on ${truncateLabel(largest.label)} (${formatDelta(largest.delta)})`;
+  // Gate the "barely moves" clause on an absolute threshold rather than "whichever moved
+  // least", so a 5-minute swing is never described as barely moving (N5-M3).
+  if (smallest.delta < SMALL_MOVE_SECONDS) {
+    return `${primary}; ${truncateLabel(smallest.label)} barely moves.`;
+  }
+  return `${primary}.`;
 }
 
 function formatDelta(seconds) {
@@ -340,4 +382,22 @@ function niceCeiling(seconds) {
     if (minutes <= steps[i]) return steps[i] * 60;
   }
   return Math.ceil(minutes / 60) * 3600;
+}
+
+/**
+ * Axis floor for one panel: start near the fastest data point so five near-flat lines span
+ * the frame instead of hugging the top. Only applies when the data really sit well above
+ * zero. The gap between floor and ceiling must be at least a third of the ceiling so the
+ * scale never collapses.
+ */
+function computeSlopeFloor(allYs, yMax) {
+  if (!Array.isArray(allYs) || allYs.length === 0) return 0;
+  const minY = Math.min(...allYs);
+  if (minY < 4 * 60) return 0;                    // below 4 minutes, keep a real zero baseline
+  if (minY < yMax * 0.25) return 0;               // too close to zero, keep the zero baseline
+  const breather = Math.max(60, (yMax - minY) * 0.15);
+  const raw = Math.max(0, minY - breather);
+  const minutes = raw / 60;
+  const step = minutes >= 20 ? 5 : minutes >= 10 ? 2 : 1;
+  return Math.floor(minutes / step) * step * 60;
 }

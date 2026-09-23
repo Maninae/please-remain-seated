@@ -9,7 +9,7 @@
  */
 
 import { CABIN_PRESETS } from '../engine/cabin-presets.js';
-import { formatPercent } from './format.js';
+import { formatPercent, makeReadableSeed } from './format.js';
 
 const SPEEDS = [1, 4, 15, 60];
 
@@ -88,8 +88,7 @@ export function mountControls({ store, sound, race }) {
     const seedInput = document.getElementById('seed-input');
     if (newBtn) {
       newBtn.addEventListener('click', () => {
-        const nextSeed = `plane-${Math.floor(Math.random() * 1e6).toString(36)}`;
-        store.update({ seed: nextSeed });
+        store.update({ seed: makeReadableSeed() });
       });
     }
     if (seedInput) {
@@ -305,8 +304,7 @@ export function mountControls({ store, sound, race }) {
         event.preventDefault(); race.restart();
       } else if (key === 'n') {
         event.preventDefault();
-        const nextSeed = `plane-${Math.floor(Math.random() * 1e6).toString(36)}`;
-        store.update({ seed: nextSeed });
+        store.update({ seed: makeReadableSeed() });
       } else if (SPEEDS.map((s) => String(s)[0]).includes(key)) {
         // 1 -> 1x, 4 -> 4x. For 15x and 60x use 3 and 4 as spec-ish shortcuts.
       }

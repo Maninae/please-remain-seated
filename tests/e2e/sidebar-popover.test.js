@@ -10,6 +10,11 @@
  *   - Wait on a state condition (a class, a margin string, the presence of a node) instead of
  *     a fixed sleep. Round-04 lead flake: the previous suite had a couple of `waitForTimeout`
  *     calls where the state condition was not being polled.
+ *   - Round-05 e2e flake fix: any test that clicks a sidebar control first calls
+ *     `clearOverlays(page)`, which closes any open info popover, closes the phone drawer if
+ *     it is open, scrolls the target into view, and waits for the scrim to be gone. The
+ *     bins-select click intermittently hit "subtree intercepts pointer events" without this
+ *     because a leftover popover caught the click.
  */
 
 import test from 'node:test';
@@ -21,6 +26,38 @@ const BASE_URL = process.env.PRS_BASE_URL || 'http://localhost:5197';
 async function safeLaunch() {
   try { return await chromium.launch({ headless: true }); }
   catch (error) { return null; }
+}
+
+/**
+ * Defensive click preamble. Guarantees the target selector has no overlay above it before we
+ * click. Used before any sidebar-control click to keep the suite deterministic (round-05
+ * flake: an info popover or the settings scrim would silently intercept a click).
+ */
+async function clearOverlays(page) {
+  // Close any open info popover.
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('.info-popover')) el.remove();
+  });
+  // If the phone drawer is open, close it and wait for the scrim to become hidden.
+  const drawerOpen = await page.evaluate(() => document.body.classList.contains('settings-open'));
+  if (drawerOpen) {
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.body.classList.contains('settings-open'), { timeout: 2000 });
+  }
+  // Wait for the scrim to be truly hidden (no pointer events).
+  await page.waitForFunction(() => {
+    const scrim = document.getElementById('settings-scrim');
+    return !scrim || scrim.hidden === true;
+  }, { timeout: 2000 });
+}
+
+async function safeSidebarClick(page, selector) {
+  await clearOverlays(page);
+  const handle = await page.$(selector);
+  if (!handle) throw new Error(`no element for selector: ${selector}`);
+  await handle.scrollIntoViewIfNeeded();
+  await handle.waitForElementState('stable');
+  await handle.click();
 }
 
 test('sidebar renders at 1280 px with all settings visible', async (t) => {
@@ -202,5 +239,37 @@ test('time-split labels never render 0:60 near a minute boundary', async (t) => 
       return found;
     });
     assert.deepEqual(badLabels, [], `no time-split label should render ":60"; found ${JSON.stringify(badLabels)}`);
+  } finally { await browser.close(); }
+});
+
+/**
+ * Bins-select interaction (round-05 flake fix). This test used to intermittently hit
+ * "subtree intercepts pointer events" when an info popover was still open above the
+ * settings sidebar. `clearOverlays` closes any popover, waits for the scrim, and scrolls
+ * the target into view before we interact with it.
+ */
+test('bins-select changes value deterministically after any popover', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    const consoleErrors = [];
+    page.on('pageerror', (e) => consoleErrors.push(e.message));
+    page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+    await page.goto(`${BASE_URL}/index.html?seed=bins-1&bins=roomy`, { waitUntil: 'load' });
+    await page.waitForSelector('#bins-select');
+    // Open the strategy-a info popover on purpose so the flake condition is present.
+    await page.click('[data-strategy-picker="a"] .info-btn');
+    await page.waitForSelector('.info-popover', { timeout: 2000 });
+    // Now change the bins picker. clearOverlays inside safeSelectOption must dispatch cleanly.
+    await clearOverlays(page);
+    const before = await page.$eval('#bins-select', (el) => el.value);
+    await page.selectOption('#bins-select', 'legacy');
+    await page.waitForFunction(() => document.getElementById('bins-select')?.value === 'legacy', { timeout: 2000 });
+    const after = await page.$eval('#bins-select', (el) => el.value);
+    assert.notEqual(after, before, 'bins-select value should change');
+    assert.equal(after, 'legacy', 'bins-select should hold the new value');
+    assert.deepEqual(consoleErrors, [], 'no console errors after the bins change');
   } finally { await browser.close(); }
 });

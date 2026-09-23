@@ -6,6 +6,10 @@
  * Options:
  *   width           SVG width in px (defaults to 720 or the svg width attribute).
  *   title           Optional title above the bar.
+ *   mode            Optional 'deplane' | 'board'. In BOARD mode the `seatedWait` bucket holds
+ *                   time passengers spend queued outside the plane before their turn to walk,
+ *                   so we relabel it "waiting to board" (N5-m1). Deplane mode keeps the
+ *                   default "seated waiting" label.
  *   scaleTotal      Pin the bar length to this many seconds instead of the split's own total.
  *                   The caller passes the larger of the two lanes' totals so the two bars share
  *                   one scale (a lane that finished 67s sooner is visibly shorter). If omitted,
@@ -29,8 +33,18 @@ const TIMESPLIT_TITLE_FONT_PX = 15;
 const TIMESPLIT_INSET_PX = 8;
 
 const BUCKET_ORDER = ['seatedWait', 'aisleBlocked', 'bags', 'walking'];
-const BUCKET_LABELS = {
+// Deplane-mode labels are the default. Board mode swaps the first bucket, because in
+// board-sim.js the QUEUED phase (before a passenger has stepped into the aisle) is bucketed
+// into `seatedWait`; calling that "seated waiting" alongside a mid-race caption reading
+// "nobody seated yet" was a contradiction (N5-m1).
+const BUCKET_LABELS_DEPLANE = {
   seatedWait: 'seated waiting',
+  aisleBlocked: 'aisle blocked',
+  bags: 'bags',
+  walking: 'walking',
+};
+const BUCKET_LABELS_BOARD = {
+  seatedWait: 'waiting to board',
   aisleBlocked: 'aisle blocked',
   bags: 'bags',
   walking: 'walking',
@@ -47,6 +61,7 @@ export function renderTimeSplit(host, split, options = {}) {
   clearElement(svg);
   const width = options.width || readNumericAttr(svg, 'width') || 720;
   const height = TIMESPLIT_HEIGHT_PX + (options.title ? 22 : 0);
+  const bucketLabels = options.mode === 'board' ? BUCKET_LABELS_BOARD : BUCKET_LABELS_DEPLANE;
   setAttrs(svg, {
     width, height,
     viewBox: `0 0 ${width} ${height}`,
@@ -91,7 +106,7 @@ export function renderTimeSplit(host, split, options = {}) {
       x, y: barY, width: w, height: barH,
       fill: BUCKET_COLORS[key],
     });
-    const label = `${BUCKET_LABELS[key]}  ${formatMinutesSeconds(v)}`;
+    const label = `${bucketLabels[key]}  ${formatMinutesSeconds(v)}`;
     const fits = w >= approximateTextWidth(label, TIMESPLIT_LABEL_FONT_PX) + TIMESPLIT_INSET_PX * 2;
     if (fits) {
       appendText(svg, {

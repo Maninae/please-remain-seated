@@ -68,16 +68,16 @@ Walking speed, bag stow and retrieval time, seat-interference movement counts, a
 | Seat-interference movement counts | Schultz, [Consideration of Passenger Interactions](https://doi.org/10.3390/aerospace5040101), Aerospace 5(4):101, 2018 |
 | One-column (aisle-first) deplaning claim | Milne & Salari, [JATM 43](https://www.sciencedirect.com/science/article/abs/pii/S0969699714000027), 2015 |
 | Boarding-method ordering (Steffen fastest, back-to-front slowest) | Steffen, [JATM 14(3)](https://arxiv.org/abs/0802.0733), 2008; Steffen & Hotchkiss, [JATM 18(1)](https://arxiv.org/abs/1108.5211), 2012 |
-| Random / WILMA / open-seating boarding times | [MythBusters episode 222](https://mythresults.com/airplane-boarding), 2012 |
+| Random / WILMA / open-seating boarding times | [MythBusters episode 222](https://mythresults.com/airplane-boarding), 2014 |
 
-Every strategy's total time is checked against these bounds by the calibration tests, `tests/unit/calibration-deplane.test.js` and `tests/unit/calibration-board.test.js`, median over 40 seeds each.
+Every strategy's total time is checked against these bounds by the calibration tests, `tests/unit/calibration-deplane.test.js` and `tests/unit/calibration-board.test.js`. See those files for the seed count each bound is asserted against; per-gate counts and families change independently and are stated inline in the tests, not duplicated here.
 
 The whole-run deplaning gate derives from the two sources above, not from a widened tolerance:
 
 - The A320 default carries 153 passengers (180 seats at 0.85 load factor).
 - Schultz 2018 measured a median door outflow of 23 pax/min (Q1 18, Q3 29) in the first minute of outflow.
 - Milne and Salari 2016 report A320 deplanings of 8.5 to 9.6 minutes at 15 to 17 pax/min whole-run door rate.
-- The whole-run gate spans 14 to 27 pax/min (Milne and Salari low end to comfortably above Schultz's median; Schultz's Q3 is 29), the first-two-minute gate spans 15 to 30 pax/min, and the total-minutes sanity bound spans 5 to 13 minutes, all measured from door open. Each bound is asserted on the median of 40 seeds, across six independent seed families (calib, stagger, critic2, critic3, family-a, family-b), so a single lucky family cannot flip the gate.
+- The whole-run gate spans 14 to 27 pax/min (Milne and Salari low end to comfortably above Schultz's median; Schultz's Q3 is 29), the first-two-minute gate spans 15 to 30 pax/min, and the total-minutes sanity bound spans 5 to 13 minutes, all measured from door open. Each bound is asserted across six independent seed families (calib, stagger, critic2, critic3, family-a, family-b), so a single lucky family cannot flip the gate; per-family seed counts live in the test file so this README stays honest as they evolve.
 - The model runs at the fast end of that band. Whole-run throughput lands around 23 to 25 pax/min at defaults, close to Schultz's median and above Milne and Salari's range; the 45-second door-open staging window in `js/engine/config.js` is what puts it there.
 
 ## Run it locally

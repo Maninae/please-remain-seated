@@ -427,6 +427,11 @@ label { color: var(--ink-soft); font-size: 13px; }
 
 .mono-num { font-variant-numeric: tabular-nums; }
 
+/* Muted label utility used by controls that need a soft label next to a form control.
+ * Replaces one inline `style="color:var(--ink-muted);"` so index.html can ship with a
+ * strict Content-Security-Policy that does not allow inline styles. */
+.muted-label { color: var(--ink-muted); }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }

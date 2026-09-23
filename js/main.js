@@ -24,6 +24,7 @@ import { mountTabs } from './ui/tabs.js';
 import { mountRankingsTab } from './ui/rankings/index.js';
 import { mountAboutTab } from './ui/about.js';
 import { loadRankingsIndex } from './ui/rankings/rankings-data.js';
+import { computeSeedTierSummary } from './ui/rankings/index.js';
 import {
   DEPLANE_STRATEGIES, BOARD_STRATEGIES, BOARD_STRATEGY_BY_ID,
   DEFAULT_DEPLANE_STRATEGY_ID, DEFAULT_BOARD_STRATEGY_ID,
@@ -224,6 +225,9 @@ function boot() {
           generatedAt: result.indexObject.generatedAt,
           engineVersion: result.indexObject.engineVersion,
           seedTiers: result.indexObject.seedTiers,
+          // N5-B1: compute the honest tier summary from the cells in the index and hand it
+          // to the About tab, so the About tab can print the tier state that shipped.
+          seedTierSummary: computeSeedTierSummary(result.indexObject),
           preview: result.indexObject.preview,
         };
         window.dispatchEvent(new CustomEvent('prs:rankings-index-loaded', { detail: generationRef.current }));

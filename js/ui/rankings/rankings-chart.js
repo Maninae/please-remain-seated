@@ -6,15 +6,22 @@
  * rows and textbook rows sit under two headers with a hairline rule between them (deplane
  * cells have one group, so no rule).
  *
- * Axis policy: the axis is CLIPPED to a band that fits the rows in the middle 90% of the
- * distribution, and rows past the cap render as broken bars with their value printed in the
- * gutter. A single 40-minute front-to-back outlier used to compress every airline into a
- * fifth of the plot; the clip fixes that (N4-M6). Rows within one standard error of the
- * leader (SE of median approx (p90-p10) / 2.563) collapse into a visibly "tied" band with a
- * bracket and a caption — printing a strict rank on ties within noise misleads (N4-M4).
+ * Axis policy:
+ *   - The axis STARTS near the data floor (p10 of the fastest row, rounded down to a nice
+ *     minute), not at zero. Boarding times have a hard floor around 14 min on this aircraft;
+ *     starting at 0 wasted 47% of the plot width and turned the ranking into a table with
+ *     decoration (N5-M4).
+ *   - The axis is CLIPPED to a band that fits the rows in the middle 90% of the
+ *     distribution, and rows past the cap render as broken bars with their value printed in the
+ *     gutter. A single 40-minute front-to-back outlier used to compress every airline into a
+ *     fifth of the plot; the clip fixes that (N4-M6).
+ *   - Rows within TIE_TOLERANCE_SECONDS of a running window collapse into a visibly "tied"
+ *     band with a bracket and a caption. Printing a strict rank on ties within noise misleads
+ *     (N4-M4).
  *
- * Title: the finding sentence sits above the chart and wraps to two or three lines at narrow
- * widths instead of ellipsizing mid-word (N4-M7).
+ * Title: rendered outside this chart as a HERO sentence in HTML above the SVG (N5-M2).
+ * `findingSentence` is accepted for back-compat but rendered only when it is non-empty;
+ * the tab passes '' now.
  *
  * Real-world anchors appear as thin labelled ticks along the top axis (design/07: distinct
  * "measured, not simulated" style). Anchors carry a small info trigger the caller can wire.
@@ -81,12 +88,16 @@ export function renderRankingsChart(host, {
   const anchorBand = anchorRows > 0 ? anchorRows * 12 + 10 : 8;
   const paddingTop = 12 + titleHeight + 14 + anchorBand + 12;
 
-  // Choose the axis cap: median of p90s + a headroom bump so 22 of 23 rows sit legibly. Rows
-  // whose median exceeds axisMax draw as broken bars in the gutter instead of stretching the
-  // plot to their tail. A single outlier used to eat 60% of the width.
+  // Axis range: start near the data floor and cap in the middle of the distribution.
+  // Floor: p10 of the fastest row, rounded DOWN to a nice minute value. Boarding times have
+  // a real physical floor around 14 min on this aircraft; a zero baseline used to eat 47% of
+  // the plot (N5-M4).
+  // Cap: median of p90s + headroom. Rows whose median exceeds axisMax draw as broken bars
+  // in the right gutter instead of stretching the plot to their tail (N4-M6).
   const bandRows = strategies;
   const axisMax = computeAxisCap(bandRows, anchors);
   const paddedMax = niceCeiling(axisMax);
+  const paddedMin = computeAxisFloor(bandRows, anchors, paddedMax);
   const outlierThreshold = paddedMax * OUTLIER_MULT;
 
   // Bottom caption for the tie band, so we reserve height for it if it renders. Wrap width
@@ -107,10 +118,10 @@ export function renderRankingsChart(host, {
 
   drawTitle(svg, titleLines, width);
   const axisY = paddingTop - anchorBand - 2;
-  drawAxis(svg, chartX0, chartX1, axisY, paddedMax);
+  drawAxis(svg, chartX0, chartX1, axisY, paddedMin, paddedMax);
   const plotBottom = paddingTop + totalRows * ROW_HEIGHT + groupGaps + 4;
   drawAnchors(svg, {
-    anchors, chartX0, chartX1, paddedMax, axisY, plotBottom, onAnchorClick,
+    anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick,
   });
 
   const hitTargets = [];
@@ -177,7 +188,7 @@ export function renderRankingsChart(host, {
       const isOutlier = Number.isFinite(row.medianSeconds) && row.medianSeconds > outlierThreshold;
       drawRow(svg, {
         row,
-        chartX0, chartX1, chartWidth, paddedMax,
+        chartX0, chartX1, chartWidth, paddedMin, paddedMax,
         y: cursorY + ROW_HEIGHT / 2,
         paddingLeft, paddingRight,
         isOutlier,
@@ -241,19 +252,42 @@ function computeAxisCap(rows, anchors) {
 }
 
 /**
- * Group the top rows into a tie band: any run of rows whose median differs from the leader
- * by less than a shared uncertainty tolerance stays in one visual band. Uncertainty tolerance
- * per row is roughly (p90 - p10) / 2.563, the SE of the median for a normal-ish distribution
- * with n=200. We take the LARGEST such SE across the leading rows so the tie band is
- * conservative.
+ * Axis floor: p10 of the fastest row, minus a small margin, floored to a nice minute value.
+ * If any anchor sits lower, the floor drops to include it. Never goes above 0 for very short
+ * cabins (CRJ deplaning at 3 minutes wants a 0m start; only long cabins earn a floor).
+ * The gap between floor and cap must be at least a third of the cap so the scale never
+ * collapses to a hairline for a very uniform group.
  */
+function computeAxisFloor(rows, anchors, paddedMax) {
+  const p10s = rows.map((r) => r.p10).filter((v) => Number.isFinite(v));
+  if (p10s.length === 0) return 0;
+  const minP10 = Math.min(...p10s);
+  const anchorMin = anchors.reduce((min, a) => {
+    const s = (a.minutes || 0) * 60;
+    return s > 0 && s < min ? s : min;
+  }, Number.POSITIVE_INFINITY);
+  const candidate = Math.min(minP10, Number.isFinite(anchorMin) ? anchorMin : minP10);
+  // Only apply a floor when the data really do sit far from zero: at least 4 minutes above 0
+  // AND at least 25% of the axis cap.
+  if (candidate < 4 * 60) return 0;
+  if (candidate < paddedMax * 0.25) return 0;
+  // Leave a small breather below the data so the leftmost dot doesn't kiss the axis label.
+  const breather = Math.max(30, (paddedMax - candidate) * 0.05);
+  const raw = Math.max(0, candidate - breather);
+  const minutes = raw / 60;
+  // Floor to a nice minute value (multiples of 1, 2, or 5 depending on scale).
+  const step = minutes >= 20 ? 5 : minutes >= 10 ? 2 : 1;
+  return Math.floor(minutes / step) * step * 60;
+}
+
 /**
- * Group rows into a visibly tied band: any leader-adjacent row whose median differs from the
- * leader by less than `TIE_TOLERANCE_SECONDS` reads as tied. 60 seconds matches the
- * plain-language "within a minute" the finding sentence uses, and comfortably exceeds the
- * 12 s SE of the median at n=200 so a strict rank on rows inside the band is not defensible.
- * A stricter "1 SE" tolerance would band only two or three rows; the reader learns much more
- * from "these eleven are all within a minute" than from "these two are within 4 seconds".
+ * Group rows into a visibly tied band: the largest sliding window whose spread stays within
+ * `TIE_TOLERANCE_SECONDS`. 60 seconds matches the plain-language "within a minute" the
+ * finding sentence uses, and comfortably exceeds the SE of the median at n=200 (about 11 s
+ * on typical rows, computed in `seMedian()` below) so a strict rank on rows inside the band
+ * is not defensible. A stricter "1 SE" tolerance would band only two or three rows; the
+ * reader learns much more from "these eleven are all within a minute" than from "these two
+ * are within 4 seconds".
  */
 const TIE_TOLERANCE_SECONDS = 60;
 
@@ -287,10 +321,10 @@ function computeTieSpan(rows) {
 
 /**
  * Standard error of the median for one strategy row's distribution across seeds. For a
- * roughly normal distribution the seed-to-seed standard deviation is (p90 - p10) / 2.563 and
- * the SE of the median is 1.253 * sigma / sqrt(n), which reduces to about 0.489 * sigma /
- * sqrt(n). At n=200 with p90-p10 ~= 350 s that lands at about 12 s, matching the critic's
- * calibration. Rows within 1 SE of the leader read as statistically tied.
+ * roughly normal distribution the seed-to-seed standard deviation is (p90 - p10) / 2.563
+ * (the interpercentile range divided by z_0.90 - z_0.10 = 1.2816 - (-1.2816)). The SE of
+ * the median is 1.253 * sigma / sqrt(n). At n=200 with p90-p10 ~= 350 s that lands at about
+ * 11 s. Rows within 1 SE of the leader read as statistically tied.
  */
 function seMedian(row) {
   const p90 = row.p90;
@@ -316,7 +350,10 @@ function computeTieCaption(groups) {
   const tieLast = sorted[tie.startIndex + tie.count - 1];
   const spanSeconds = Math.max(0, tieLast.medianSeconds - tieFirst.medianSeconds);
   const noun = airlineGroup ? 'airline procedures' : 'strategies';
-  return `These ${tie.count} ${noun} are within a minute of each other (${Math.round(spanSeconds)}-second spread).`;
+  // N5-m3: the finding sentence counts airlines within a minute of RANDOM; this caption
+  // counts the largest sliding window of airlines within a minute of EACH OTHER. Two
+  // different sets, so we name both rules to avoid the "why 11 vs 10" ambiguity.
+  return `The ${tie.count} shaded ${noun} land within a minute of one another (${Math.round(spanSeconds)}-second spread); the finding above counts a different set: airlines within a minute of random.`;
 }
 
 /**
@@ -382,15 +419,20 @@ function drawTitle(svg, titleLines, width) {
   void width;
 }
 
-function drawAxis(svg, x0, x1, axisY, paddedMax) {
+function drawAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
+  const minuteMin = paddedMin / 60;
   const minuteMax = paddedMax / 60;
-  const step = niceMinuteStep(minuteMax);
+  const range = Math.max(1e-9, minuteMax - minuteMin);
+  const step = niceMinuteStep(range);
   appendLine(svg, {
     x1: x0, x2: x1, y1: axisY, y2: axisY,
     stroke: THEME.rule, 'stroke-width': 0.5,
   });
-  for (let m = 0; m <= minuteMax + 1e-9; m += step) {
-    const px = x0 + (m / minuteMax) * (x1 - x0);
+  // Tick at every step from the axis floor upward; label with true minutes so the reader
+  // never has to remember the shift.
+  const firstTick = Math.ceil(minuteMin / step) * step;
+  for (let m = firstTick; m <= minuteMax + 1e-9; m += step) {
+    const px = x0 + ((m - minuteMin) / range) * (x1 - x0);
     appendLine(svg, {
       x1: px, x2: px, y1: axisY - 3, y2: axisY + 3,
       stroke: THEME.rule, 'stroke-width': 0.6,
@@ -403,33 +445,81 @@ function drawAxis(svg, x0, x1, axisY, paddedMax) {
       'fill-opacity': 0.55,
     }, `${formatMinutes(m)}m`);
   }
+  // When the axis starts above zero, mark the floor explicitly. Small dashed tick + label so
+  // the reader sees the axis is truncated, not miscalibrated.
+  if (paddedMin > 0) {
+    appendLine(svg, {
+      x1: x0, x2: x0, y1: axisY - 5, y2: axisY + 5,
+      stroke: THEME.rule, 'stroke-width': 0.8, 'stroke-dasharray': '2 2',
+    });
+    appendText(svg, {
+      x: x0, y: axisY + 14,
+      'font-size': AXIS_FONT_PX,
+      'text-anchor': 'start',
+      fill: THEME.ink,
+      'fill-opacity': 0.45,
+      'font-style': 'italic',
+    }, `axis starts at ${formatMinutes(minuteMin)}m`);
+  }
 }
 
-function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMax, axisY, plotBottom, onAnchorClick }) {
+function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick }) {
   if (!anchors || anchors.length === 0) return;
   const LABEL_MIN_GAP = 82;
   const ROW_OFFSETS = [22, 34, 46];
+  const chartInner = chartX1 - chartX0;
+  const range = Math.max(1, paddedMax - paddedMin);
+  const projectSeconds = (s) => chartX0 + Math.min(1, Math.max(0, (s - paddedMin) / range)) * chartInner;
   const anchorPoints = anchors
     .map((anchor) => {
-      const seconds = anchor.minutes * 60;
-      if (!Number.isFinite(seconds) || seconds <= 0) return null;
-      const fraction = seconds / paddedMax;
-      if (fraction < 0 || fraction > 1.001) return null;
-      return { anchor, x: chartX0 + Math.min(fraction, 1) * (chartX1 - chartX0) };
+      const startSec = anchor.minutes * 60;
+      if (!Number.isFinite(startSec) || startSec <= 0) return null;
+      const isRange = anchor.kind === 'range' && Number.isFinite(anchor.minutesEnd);
+      const endSec = isRange ? anchor.minutesEnd * 60 : startSec;
+      // Skip anchors entirely outside the axis window; keep partial-inside ones and clip.
+      if (endSec < paddedMin || startSec > paddedMax * 1.001) return null;
+      const xStart = projectSeconds(startSec);
+      const xEnd = projectSeconds(endSec);
+      const xMid = (xStart + xEnd) / 2;
+      return { anchor, x: xMid, xStart, xEnd, isRange };
     })
     .filter(Boolean)
     .sort((a, b) => a.x - b.x);
   const lastXPerRow = ROW_OFFSETS.map(() => -Infinity);
-  for (const { anchor, x } of anchorPoints) {
-    appendLine(svg, {
-      x1: x, x2: x,
-      y1: axisY,
-      y2: plotBottom,
-      stroke: THEME.ink,
-      'stroke-width': 1.2,
-      'stroke-dasharray': '2 3',
-      'stroke-opacity': 0.55,
-    });
+  for (const { anchor, x, xStart, xEnd, isRange } of anchorPoints) {
+    if (isRange && xEnd - xStart > 2) {
+      // Draw the range as a soft shaded band spanning the two endpoints, with a single
+      // horizontal top rule so the reader sees one measurement, not two (N5-m2).
+      appendRect(svg, {
+        x: xStart, y: axisY,
+        width: Math.max(1, xEnd - xStart),
+        height: Math.max(1, plotBottom - axisY),
+        fill: THEME.ink,
+        'fill-opacity': 0.045,
+      });
+      appendLine(svg, {
+        x1: xStart, x2: xEnd, y1: axisY, y2: axisY,
+        stroke: THEME.ink, 'stroke-width': 1.2, 'stroke-opacity': 0.55,
+      });
+      appendLine(svg, {
+        x1: xStart, x2: xStart, y1: axisY, y2: plotBottom,
+        stroke: THEME.ink, 'stroke-width': 0.8, 'stroke-opacity': 0.35, 'stroke-dasharray': '2 3',
+      });
+      appendLine(svg, {
+        x1: xEnd, x2: xEnd, y1: axisY, y2: plotBottom,
+        stroke: THEME.ink, 'stroke-width': 0.8, 'stroke-opacity': 0.35, 'stroke-dasharray': '2 3',
+      });
+    } else {
+      appendLine(svg, {
+        x1: x, x2: x,
+        y1: axisY,
+        y2: plotBottom,
+        stroke: THEME.ink,
+        'stroke-width': 1.2,
+        'stroke-dasharray': '2 3',
+        'stroke-opacity': 0.55,
+      });
+    }
     let bestRow = 0;
     let bestClearance = -Infinity;
     for (let i = 0; i < ROW_OFFSETS.length; i += 1) {
@@ -442,6 +532,9 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMax, axisY, plotBot
     }
     lastXPerRow[bestRow] = x;
     const y = axisY - ROW_OFFSETS[bestRow];
+    // Anchor label as a plain SVG <text>. When a click handler is wired we tag it with a
+    // class so the pointer cursor is set via CSS (rankings.css), keeping the inline `style`
+    // attribute off the DOM so the CSP does not need to allow inline styles (security n1).
     const label = appendText(svg, {
       x, y,
       'font-size': ANCHOR_LABEL_FONT_PX,
@@ -450,7 +543,7 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMax, axisY, plotBot
       'fill-opacity': 0.7,
       'font-style': 'italic',
       'data-anchor-id': anchor.id,
-      style: onAnchorClick ? 'cursor: pointer;' : '',
+      class: onAnchorClick ? 'rankings-anchor-clickable' : 'rankings-anchor-label',
     }, anchor.label);
     if (onAnchorClick) {
       label.addEventListener('click', (event) => {
@@ -462,8 +555,10 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMax, axisY, plotBot
 }
 
 function drawRow(svg, {
-  row, chartX0, chartX1, chartWidth, paddedMax, y, paddingLeft, paddingRight, isOutlier,
+  row, chartX0, chartX1, chartWidth, paddedMin, paddedMax, y, paddingLeft, paddingRight, isOutlier,
 }) {
+  const range = Math.max(1, paddedMax - paddedMin);
+  const projectSeconds = (s) => chartX0 + Math.min(1, Math.max(0, (s - paddedMin) / range)) * chartWidth;
   const median = row.medianSeconds;
   const p10 = row.p10;
   const p90 = row.p90;
@@ -487,8 +582,8 @@ function drawRow(svg, {
   if (isOutlier) {
     // Broken bar: draw the band up to the axis edge, terminate with a zigzag break mark, and
     // print the true value in the right gutter. The plot no longer stretches to fit this row.
-    const bandLow = Math.max(0, Math.min(p10, paddedMax));
-    const bandStartX = chartX0 + (bandLow / paddedMax) * chartWidth;
+    const bandLow = Math.max(paddedMin, Math.min(p10, paddedMax));
+    const bandStartX = projectSeconds(bandLow);
     const bandEndX = chartX1;
     appendRect(svg, {
       x: bandStartX, y: y - BAND_HEIGHT / 2, width: Math.max(1, bandEndX - bandStartX - 6),
@@ -523,11 +618,11 @@ function drawRow(svg, {
     return;
   }
 
-  const bandLow = Math.max(0, Math.min(p10, paddedMax));
+  const bandLow = Math.max(paddedMin, Math.min(p10, paddedMax));
   const bandHigh = Math.max(bandLow, Math.min(p90, paddedMax));
-  const bandX = chartX0 + (bandLow / paddedMax) * chartWidth;
-  const bandW = Math.max(1, ((bandHigh - bandLow) / paddedMax) * chartWidth);
-  const dotX = chartX0 + (Math.min(median, paddedMax) / paddedMax) * chartWidth;
+  const bandX = projectSeconds(bandLow);
+  const bandW = Math.max(1, projectSeconds(bandHigh) - bandX);
+  const dotX = projectSeconds(Math.min(Math.max(median, paddedMin), paddedMax));
 
   // p10-p90 band.
   appendRect(svg, {

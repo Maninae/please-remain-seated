@@ -33,18 +33,16 @@ export function anchorsFor({ mode, preset, passengerCount }) {
   if (!NARROWBODY_PRESETS.has(preset)) return [];
   const anchors = [];
   if (mode === 'board') {
+    // KLM published a 17 to 22 min RANGE for the same aircraft class. Draw it as a single
+    // shaded band spanning both endpoints (one source, one label) rather than as two
+    // separate ticks that read as two independent measurements (N5-m2).
     anchors.push({
-      id: 'klm-737-fast',
-      label: 'KLM 737 · 17 min',
+      id: 'klm-737',
+      kind: 'range',
+      label: 'KLM 737 · 17 to 22 min',
       minutes: 17,
-      source: 'Forbes 2013 (KLM redesigned boarding, 737-800)',
-      href: 'https://www.forbes.com/sites/tedreed/2013/11/16/klm-we-can-board-a-boeing-737-800-in-17-minutes/',
-    });
-    anchors.push({
-      id: 'klm-737-typical',
-      label: 'KLM 737 · 22 min',
-      minutes: 22,
-      source: 'Forbes 2013 (KLM legacy boarding, 737-800)',
+      minutesEnd: 22,
+      source: 'Forbes 2013 (KLM 737-800 boarding, redesigned to legacy range)',
       href: 'https://www.forbes.com/sites/tedreed/2013/11/16/klm-we-can-board-a-boeing-737-800-in-17-minutes/',
     });
     anchors.push({
