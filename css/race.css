@@ -89,7 +89,7 @@
 .card-header .clock {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
-  font-size: clamp(34px, 6.2vw, 54px);
+  font-size: clamp(28px, 4.4vw, 36px);
   font-weight: 600;
   color: var(--ink);
   letter-spacing: 0.01em;
@@ -246,8 +246,8 @@
 .live-gap {
   padding: 0 4px;
   color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: clamp(18px, 3vw, 24px);
+  font-weight: 700;
   min-height: 1.2em;
   margin: 0;
 }
@@ -273,7 +273,7 @@
   .card-header .strategy-picker .blurb { display: none; }
   .card-header .count { justify-self: start; }
   .card-header .clock-block { justify-self: start; align-items: flex-start; }
-  .card-header .clock { font-size: 36px; }
+  .card-header .clock { font-size: 24px; }
 
   /* Compact legend at phone width: one line, wrap allowed. Lane B keeps a hidden placeholder
    * so both card heights stay equal. */
@@ -596,7 +596,7 @@ body.finish-mode .race .cabin-card .card-header .door-status { display: none; }
   }
   body:not(.finish-mode) .race .cabin-card .card-header { min-height: 40px; }
   body:not(.finish-mode) .race .cabin-card .card-header .clock {
-    font-size: clamp(28px, 4.4vw, 44px);
+    font-size: clamp(24px, 3.6vw, 32px);
   }
   body:not(.finish-mode) .race .canvas-wrap {
     height: clamp(150px, calc((100vh - 490px) / 2), 200px) !important;

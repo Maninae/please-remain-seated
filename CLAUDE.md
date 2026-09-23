@@ -84,6 +84,7 @@ js/ui/                        DOM, driven by the store.
   settings-drawer.js             phone-only settings drawer: open/close, focus trap, Escape and tap-outside close, body scroll lock
   tabs.js                        Race / Rankings / About tab rail; keyboard nav, ?tab= round-trip, fires prs:tab-changed
   about.js                       About tab content: thesis, model bullets, calibration, airlines, docs, generation date
+  calibration-gates.js           the numeric bounds the About page prints, mirrored from the deplane calibration test so the page and the test hold the engine to the same numbers
 
 js/ui/rankings/               Rankings tab (data viz core).
   index.js                       orchestrator: mounts scaffold, loads index lazily on tab activation, wires mode/preset/knob-snap re-render

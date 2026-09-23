@@ -299,7 +299,11 @@ export function mountRace({ store, onFinish }) {
         const seat = passenger ? `seat ${passenger.row}${letter}` : 'one passenger';
         subtitle.textContent = `Following ${seat} on the ${laneIndex === 0 ? 'left' : 'right'} cabin. Click the dot again to unfollow.`;
       } else {
-        const noun = splitTarget === 'average' ? 'The average passenger' : 'The last passenger off';
+        // Mode-aware: on the boarding tab the "last" passenger is the last one SEATED, not
+        // "off", because nobody exits during a boarding race (N4-m2).
+        const isBoard = store.state().mode === 'board';
+        const lastNoun = isBoard ? 'The last passenger seated' : 'The last passenger off';
+        const noun = splitTarget === 'average' ? 'The average passenger' : lastNoun;
         const followHint = 'Click a dot on either cabin to follow one person.';
         subtitle.textContent = `${noun}. ${followHint}`;
       }

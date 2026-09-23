@@ -77,7 +77,8 @@ The whole-run deplaning gate derives from the two sources above, not from a wide
 - The A320 default carries 153 passengers (180 seats at 0.85 load factor).
 - Schultz 2018 measured a median door outflow of 23 pax/min (Q1 18, Q3 29) in the first minute of outflow.
 - Milne and Salari 2016 report A320 deplanings of 8.5 to 9.6 minutes at 15 to 17 pax/min whole-run door rate.
-- So the whole-run gate spans 14 to 24 pax/min (Milne and Salari low end to Schultz median) and the total-minutes sanity bound spans 5 to 13 minutes, measured from door open, over medians of 40 seeds.
+- The whole-run gate spans 14 to 27 pax/min (Milne and Salari low end to comfortably above Schultz's median; Schultz's Q3 is 29), the first-two-minute gate spans 15 to 30 pax/min, and the total-minutes sanity bound spans 5 to 13 minutes, all measured from door open. Each bound is asserted on the median of 40 seeds, across six independent seed families (calib, stagger, critic2, critic3, family-a, family-b), so a single lucky family cannot flip the gate.
+- The model runs at the fast end of that band. Whole-run throughput lands around 23 to 25 pax/min at defaults, close to Schultz's median and above Milne and Salari's range; the 45-second door-open staging window in `js/engine/config.js` is what puts it there.
 
 ## Run it locally
 

@@ -75,6 +75,7 @@ export function mountRankingsTab({ store }) {
     state.preview = result.preview;
     state.loaded = true;
     setStatus(panel, '');
+    updateLedeFromIndex(panel, state.indexObject);
     populatePresetSelect(state.indexObject);
     // Announce the load so the About tab (and anyone else) picks up the generation date
     // without kicking off a second fetch.
@@ -82,6 +83,8 @@ export function mountRankingsTab({ store }) {
       detail: {
         generatedAt: result.indexObject.generatedAt,
         engineVersion: result.indexObject.engineVersion,
+        seedTiers: result.indexObject.seedTiers,
+        preview: result.indexObject.preview,
       },
     }));
     rerender();
@@ -207,7 +210,7 @@ function buildScaffold(panel) {
       <header class="rankings-header">
         <div class="rankings-header-text">
           <h2 class="rankings-title">Rankings from many random planes</h2>
-          <p class="rankings-lede">Every strategy, run thousands of times, sorted by how long it takes at these settings. Ticks along the top mark real airline and study times for the same aircraft class.</p>
+          <p class="rankings-lede" data-rankings-lede>Every strategy, run many times, sorted by how long it takes at these settings. Ticks along the top mark real airline and study times for the same aircraft class.</p>
         </div>
         <div class="rankings-controls">
           <div class="rankings-toggle" role="radiogroup" aria-label="Simulation mode">
@@ -336,22 +339,7 @@ function renderTop(panel, request, cellRef) {
   if (select && select.value !== request.preset) select.value = request.preset;
 
   const notes = panel.querySelector('[data-rankings-knob-notes]');
-  if (notes) {
-    const parts = [
-      { key: 'load', label: 'How full' },
-      { key: 'compliance', label: 'Follow the rules' },
-      { key: 'groups', label: 'Groups' },
-      { key: 'bags', label: 'Carry-ons' },
-      { key: 'bins', label: 'Overhead bins' },
-    ];
-    notes.innerHTML = parts.map(({ key, label }) => {
-      const value = request.nearest[key] || '';
-      return `<span class="rankings-knob-note"><span class="rankings-knob-note-label">${label}</span><span class="rankings-knob-note-value">${value}</span></span>`;
-    }).join('');
-    if (!cellRef.exactMatch) {
-      notes.insertAdjacentHTML('afterbegin', '<span class="rankings-knob-note rankings-knob-note-warn">Falling back to the headline cell for this preset. Move a knob back to default to see its precomputed run.</span>');
-    }
-  }
+  if (notes) renderKnobNotes(notes, request, cellRef);
 
   const footnote = panel.querySelector('[data-rankings-footnote]');
   if (footnote) {
@@ -359,6 +347,80 @@ function renderTop(panel, request, cellRef) {
     const cellData = cellRef.cell;
     footnote.textContent = `Cell: ${cellData.id}. ${cellData.seeds.toLocaleString('en-US')} runs per strategy.`;
   }
+}
+
+// Print, per knob, the value the CURRENTLY LOADED cell was run at. When a knob's requested
+// value did not exist in the precomputed grid (no sensitivity cell for that knob on this
+// preset), print "no run at X, showing Y" so the label never misstates the data's provenance.
+// This closes N4-B1: the strip used to say "nearest run: 50%" while the 85% cell was loaded.
+function renderKnobNotes(host, request, cellRef) {
+  const knobs = cellRef.cell.knobs || {};
+  const requestedSnapped = request.knobs || {};
+  const parts = [
+    { key: 'load', label: 'How full', formatter: percentFormatter },
+    { key: 'compliance', label: 'Follow the rules', formatter: percentFormatter },
+    { key: 'groups', label: 'Groups', formatter: percentFormatter },
+    { key: 'bags', label: 'Carry-ons', formatter: bagFormatter },
+    { key: 'bins', label: 'Overhead bins', formatter: binsFormatter },
+  ];
+  host.innerHTML = '';
+  for (const { key, label, formatter } of parts) {
+    const wasLoadedAt = knobs[key];
+    const wasRequestedAt = requestedSnapped[key];
+    const requestMatchesLoaded = valuesEqual(wasLoadedAt, wasRequestedAt);
+    const wrap = document.createElement('span');
+    wrap.className = 'rankings-knob-note';
+    if (!requestMatchesLoaded) wrap.classList.add('rankings-knob-note-fallback');
+    const labelEl = document.createElement('span');
+    labelEl.className = 'rankings-knob-note-label';
+    labelEl.textContent = label;
+    const valueEl = document.createElement('span');
+    valueEl.className = 'rankings-knob-note-value';
+    if (requestMatchesLoaded) {
+      valueEl.textContent = `nearest run: ${formatter(wasLoadedAt)}`;
+    } else {
+      valueEl.textContent = `no run at ${formatter(wasRequestedAt)}, showing ${formatter(wasLoadedAt)}`;
+    }
+    wrap.appendChild(labelEl);
+    wrap.appendChild(valueEl);
+    host.appendChild(wrap);
+  }
+}
+
+function percentFormatter(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return String(v ?? '');
+  return `${Math.round(v * 100)}%`;
+}
+
+function bagFormatter(v) {
+  if (v === 'light') return 'light bags';
+  if (v === 'heavy') return 'heavy bags';
+  return 'typical bags';
+}
+
+function binsFormatter(v) {
+  return v === 'legacy' ? 'old-style bins' : 'roomy bins';
+}
+
+function valuesEqual(a, b) {
+  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-9;
+  return a === b;
+}
+
+// Rewrite the lede sentence to state the true seed count from the index. Preview builds land
+// at 200 runs per strategy today; the deck reads "many times" until this fires, then reads the
+// real number so it becomes true for free when the full precompute lands.
+function updateLedeFromIndex(panel, indexObject) {
+  const lede = panel.querySelector('[data-rankings-lede]');
+  if (!lede) return;
+  const tier = indexObject?.seedTiers || {};
+  const headline = tier.headline || tier.small || tier.preview || null;
+  if (!Number.isFinite(headline)) return;
+  const runs = headline.toLocaleString('en-US');
+  const label = indexObject.preview
+    ? `Every strategy, run ${runs} times per cell (preview build). Sorted by how long it takes at these settings.`
+    : `Every strategy, run ${runs} times per cell. Sorted by how long it takes at these settings.`;
+  lede.textContent = `${label} Ticks along the top mark real airline and study times for the same aircraft class.`;
 }
 
 function renderStats(panel, cellData, mode) {
@@ -402,6 +464,12 @@ function renderChart(panel, cellData, request, cellRef) {
   void cellRef;
 }
 
+/**
+ * Build the finding sentence. On the boarding tab we prefer the airline-tie insight when the
+ * data support it: eleven of fourteen airline procedures within a minute of random order is
+ * the sentence people forward. When ties are absent or thin we fall back to the classic
+ * "fastest vs slowest" line.
+ */
 function composeFinding(cellData, mode) {
   const strategies = [...(cellData.strategies || [])].sort((a, b) => a.medianSeconds - b.medianSeconds);
   if (strategies.length < 2) return '';
@@ -411,7 +479,23 @@ function composeFinding(cellData, mode) {
   const slowestMin = (slowest.medianSeconds / 60).toFixed(1);
   const verb = mode === 'board' ? 'boards' : 'deplanes';
   const aircraft = CABIN_PRESET_BY_ID[cellData.cell.preset]?.label || 'this cabin';
-  return `${fastest.label} ${verb} ${aircraft} in ${fastestMin} min; ${slowest.label} takes ${slowestMin}.`;
+
+  if (mode === 'board') {
+    const airline = strategies.filter((s) => s.family === 'airline');
+    const random = strategies.find((s) => s.id === 'random');
+    if (airline.length >= 6 && random) {
+      const tiedAgainstRandom = airline.filter((s) => Math.abs(s.medianSeconds - random.medianSeconds) <= 60);
+      const bestTextbook = strategies.find((s) => (s.family || 'textbook') !== 'airline' && s.id !== 'random');
+      if (tiedAgainstRandom.length >= Math.max(6, airline.length - 3) && bestTextbook) {
+        const savedSeconds = Math.max(0, random.medianSeconds - bestTextbook.medianSeconds);
+        const savedMin = Math.floor(savedSeconds / 60);
+        const savedSec = Math.round(savedSeconds - savedMin * 60);
+        const savedText = savedMin > 0 ? `${savedMin}:${savedSec < 10 ? '0' : ''}${savedSec}` : `${Math.round(savedSeconds)} seconds`;
+        return `${tiedAgainstRandom.length} of ${airline.length} airline procedures board ${aircraft} within a minute of random order. ${bestTextbook.label} saves about ${savedText} against random.`;
+      }
+    }
+  }
+  return `${fastest.label} ${verb} ${aircraft} in ${fastestMin} min; ${slowest.label} takes ${slowestMin} min.`;
 }
 
 function wireHoverPanel(svgEl, hoverHost, cellData, hitTargets) {
@@ -450,9 +534,12 @@ function wireHoverPanel(svgEl, hoverHost, cellData, hitTargets) {
     const stats = document.createElement('span');
     stats.className = 'rankings-hover-stats';
     const medMin = (strategy.medianSeconds / 60).toFixed(1);
-    const p25Min = (strategy.p25 / 60).toFixed(1);
-    const p75Min = (strategy.p75 / 60).toFixed(1);
-    stats.textContent = `n=${strategy.n.toLocaleString('en-US')} · median ${medMin} min · p25 ${p25Min} · p75 ${p75Min}`;
+    const p10Min = (strategy.p10 / 60).toFixed(1);
+    const p90Min = (strategy.p90 / 60).toFixed(1);
+    // Match the drawn band (p10 to p90) so the hover never contradicts the chart. Round-04
+    // NIT: printing p25/p75 while the band is p10/p90 was two different intervals for the
+    // same row.
+    stats.textContent = `n=${strategy.n.toLocaleString('en-US')} · median ${medMin} min · band ${p10Min} to ${p90Min} min (p10 to p90)`;
     line.appendChild(stats);
     hoverHost.appendChild(line);
     const spark = renderHistogramSparkline(strategy.histogram);

@@ -99,6 +99,30 @@
   border-bottom: 2px solid var(--rule);
 }
 
+/*
+ * Assumption table: three columns (Number, Value, Source or assumption). The kind attribute
+ * tints the source column so a reader can scan down which numbers are measured versus
+ * assumed instead of parsing each cell as prose.
+ */
+.about-assumptions-table tr[data-kind="assumption"] td:last-child {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--paper-2) 60%, transparent);
+  font-style: italic;
+}
+.about-assumptions-table tr[data-kind="estimate"] td:last-child {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+.about-assumptions-table tr[data-kind="derived"] td:last-child {
+  color: var(--ink-soft);
+}
+.about-assumptions-table tr[data-kind="measured"] td:last-child {
+  color: var(--ink);
+}
+@media (max-width: 600px) {
+  .about-table { display: block; overflow-x: auto; }
+}
+
 .about-airlines {
   display: grid;
   grid-template-columns: 1fr 1fr;

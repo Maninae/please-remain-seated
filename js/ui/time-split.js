@@ -66,12 +66,13 @@ function pickPassenger(lane, passengers, mode) {
   // back to the running average with a caption that says so, instead of pretending it is a
   // "last off" who has not left.
   const doneOnly = passengers.filter((p) => p && p.vis === 'done');
+  const emptyVerb = mode === 'board' ? 'seated yet' : 'off yet';
   if (doneOnly.length === 0) {
-    return { split: averageSplit(passengers), caption: 'average so far, nobody off yet' };
+    return { split: averageSplit(passengers), caption: `average so far, nobody ${emptyVerb}` };
   }
   const passenger = lastPassenger(doneOnly);
   const raceComplete = doneOnly.length === passengers.length;
-  const lastVerb = mode === 'board' ? 'on' : 'off';
+  const lastVerb = mode === 'board' ? 'seated' : 'off';
   const caption = raceComplete ? `last ${lastVerb}` : `slowest ${lastVerb} so far`;
   return { split: passenger ? passenger.timeSplit || EMPTY_SPLIT : { ...EMPTY_SPLIT }, caption };
 }

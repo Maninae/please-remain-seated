@@ -73,7 +73,7 @@ export const GLOSSARY = Object.freeze({
   },
   steffen: {
     title: 'Steffen method',
-    body: 'A physicist named Jason Steffen worked out a boarding order in 2008. Windows first, spaced two rows apart on the same side, then middles, then aisles. The gaps let neighbours stow bags at the same time instead of waiting on each other. In theory it is the fastest possible order.',
+    body: 'A physicist named Jason Steffen worked out a boarding order in 2008. Windows first, spaced two rows apart on the same side, then middles, then aisles. The gaps let neighbours stow bags at the same time instead of waiting on each other. In theory it is the fastest possible order, though this model finds reverse pyramid slightly faster once bags are slow enough for the second-bag stow to bind on Steffen.',
     learnMore: {
       label: 'Steffen method on Wikipedia',
       href: 'https://en.wikipedia.org/wiki/Steffen_boarding_method',
@@ -414,7 +414,7 @@ export const GLOSSARY = Object.freeze({
 
   rankings: {
     title: 'Rankings',
-    body: 'Every strategy on the current preset, sorted by median minutes across thousands of pre-run planes. A dot is the median; the band spans the 10th to the 90th percentile. Hover a row for its histogram and n. Ticks along the top mark real airline or study times for the same aircraft class.',
+    body: 'Every strategy on the current preset, sorted by median minutes across many pre-run planes. A dot is the median; the band spans the 10th to the 90th percentile; the actual run count per cell is printed on the deck. Hover a row for its histogram and n. Ticks along the top mark real airline or study times for the same aircraft class.',
     learnMore: {
       label: 'Rankings design doc',
       href: 'https://github.com/Maninae/please-remain-seated/blob/main/design/07-rankings.md',
@@ -430,6 +430,14 @@ export const GLOSSARY = Object.freeze({
     learnMore: {
       label: 'Research doc',
       href: 'https://github.com/Maninae/please-remain-seated/blob/main/design/02-research.md',
+    },
+  },
+  'per-day-scaled': {
+    title: 'Person-years per day',
+    body: 'A difference in person-minutes per flight, scaled by an estimated 25,000 US domestic departures per day (Bureau of Transportation Statistics, 2023, 9.2 million domestic flights) and expressed as person-years. The tile is an estimate: real fleet mixes include regional jets and widebodies rather than 153-seat A320s, and both the daily-departure figure and the number of passengers on a typical flight vary day to day. The comparison always subtracts one simulated strategy from another; the scaling is the same for both sides.',
+    learnMore: {
+      label: 'BTS T-100 fleet data',
+      href: 'https://www.bts.gov/topics/airlines-and-airports/airline-time-tables',
     },
   },
   sensitivity: {

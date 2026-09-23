@@ -1,109 +1,178 @@
 /**
- * Stat tiles above the ranked chart. Each tile is a big number, consistent precision, a short
- * unit label, and an info button that opens the glossary entry for the concept.
+ * Stat tiles above the ranked chart.
  *
- * Four tiles, laid out on desktop as a four-column row and stacking to two columns on phone:
+ * Four tiles on a four-column grid (stacking on phones), followed by comparison lines and the
+ * "average passenger" line. The four tiles print exact arithmetic that reconciles on screen:
  *
- *   1. Person-minutes going nowhere per flight (best strategy).
- *   2. Person-minutes going nowhere per flight (worst strategy).
- *   3. Difference (worst minus best), the "cost of the wrong pick".
- *   4. If every US domestic flight used the worst instead of the best: N person-years per day
- *      (approx. 25,000 daily departures per BTS).
+ *   1. Best strategy on this cell, person-minutes idle per flight.
+ *   2. Worst strategy on this cell, person-minutes idle per flight.
+ *   3. Difference between the two, person-minutes per flight (= worst - best exactly).
+ *   4. Same difference scaled to person-years per day across US domestic departures,
+ *      labelled as "difference scaled" so the reader never reads it as a total. Its info
+ *      button opens the per-day-scaled popover (its own popover, not the anchors popover).
  *
- * Plus a fifth row: "the average passenger sits going nowhere for m:ss" for the best strategy,
- * as a plain sub-line beneath the tiles.
+ * All four numbers round to the nearest whole person-minute (person-year for tile 4). At that
+ * resolution best + difference is exactly worst; a reader who subtracts the tiles on screen
+ * gets the same answer the code got (N4-M3).
  *
- * We compute person-minutes from the cell file: each strategy row carries
- * `idlePersonMinutesMedian`. `passengerCount` is on every row and identical across rows in the
- * same cell (a cell shares one population).
+ * Below the tiles: for BOARDING mode we print the three honest comparisons the critic asked
+ * for — best textbook vs random, best airline vs random, and average airline vs best
+ * textbook, each scaled to person-years per day. For deplaning we print the best vs a
+ * plausible ceiling in the same units. Every scaled figure carries the "estimate" tag in the
+ * secondary line so the reader never reads it as a measurement.
+ *
+ * The "average passenger sits going nowhere for m:ss" sentence stays at the bottom.
  */
 
 import { createInfoButton } from '../info-popover.js';
 
-// BTS: US airlines scheduled ~9.2M domestic flights in 2023, which is 25k/day; the same
-// figure is reported by both BTS T-100 and Cirium fleet summaries. We keep it round: the tile
-// is an estimate, marked as such in the info popover.
+// BTS: US airlines scheduled ~9.2M domestic flights in 2023, ~25k/day. Marked as estimate in
+// the per-day-scaled popover.
 const US_DAILY_DEPARTURES = 25000;
 const MINUTES_PER_YEAR = 60 * 24 * 365.25;
 
+function fmtInt(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  return Math.round(value).toLocaleString('en-US');
+}
+
+function fmtPersonYears(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 100) return Math.round(value).toLocaleString('en-US');
+  if (value >= 10) return value.toFixed(1);
+  return value.toFixed(2);
+}
+
+function fmtClock(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const total = Math.round(seconds);
+  const minutes = Math.floor(total / 60);
+  const secs = total - minutes * 60;
+  return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+function personYearsFromPersonMinutes(personMinutes) {
+  return (personMinutes * US_DAILY_DEPARTURES) / MINUTES_PER_YEAR;
+}
+
 /**
- * Build the tiles panel into `host`. Returns { host } for symmetry with the chart.
- *
- * `passengerCount` lives at the cell-file top level (design/07) not on each strategy row,
- * so the caller passes it explicitly instead of digging through best.passengerCount.
+ * Build the tile row into `host`. Returns { host } for symmetry with the chart.
  */
 export function renderStatTiles(host, { strategies, mode, passengerCount }) {
   host.innerHTML = '';
-  const list = pickBestWorst(strategies);
-  if (!list) {
+  if (!Array.isArray(strategies) || strategies.length < 2) {
     const empty = document.createElement('p');
     empty.className = 'rankings-stats-empty';
     empty.textContent = 'No rankings data for this cell yet.';
     host.appendChild(empty);
     return { host };
   }
-  const { best, worst } = list;
+
+  const refs = pickComparisonReferences(strategies);
+  const best = refs.bestOverall;
+  const worst = refs.worstOverall;
+  if (!best || !worst) {
+    const empty = document.createElement('p');
+    empty.className = 'rankings-stats-empty';
+    empty.textContent = 'No rankings data for this cell yet.';
+    host.appendChild(empty);
+    return { host };
+  }
+
+  const bestVal = Math.round(best.idlePersonMinutesMedian);
+  const worstVal = Math.round(worst.idlePersonMinutesMedian);
+  const diffVal = worstVal - bestVal;             // exact by construction; reconciles on screen.
+  const perDayYears = personYearsFromPersonMinutes(diffVal);
+  const modeVerbNoun = mode === 'board' ? 'boarding' : 'deplaning';
 
   const grid = document.createElement('div');
   grid.className = 'rankings-stats-grid';
 
-  const bestIdlePerFlight = best.idlePersonMinutesMedian;
-  const worstIdlePerFlight = worst.idlePersonMinutesMedian;
-  const diffIdle = worstIdlePerFlight - bestIdlePerFlight;
-  const perDayPersonMinutes = diffIdle * US_DAILY_DEPARTURES;
-  const perDayPersonYears = perDayPersonMinutes / MINUTES_PER_YEAR;
-
-  const modeVerbNoun = mode === 'board' ? 'boarding' : 'deplaning';
-
   grid.appendChild(tile({
-    label: `Best strategy · ${modeVerbNoun}`,
+    label: `Best · ${modeVerbNoun}`,
     subLabel: best.label,
-    value: formatPersonMinutes(bestIdlePerFlight),
-    unit: 'person-minutes wasted per flight',
+    value: fmtInt(bestVal),
+    unit: 'person-minutes idle per flight',
     infoKey: 'person-minutes',
+    dataAttrs: { 'data-arith-best': String(bestVal) },
   }));
   grid.appendChild(tile({
-    label: `Worst strategy · ${modeVerbNoun}`,
+    label: `Worst · ${modeVerbNoun}`,
     subLabel: worst.label,
-    value: formatPersonMinutes(worstIdlePerFlight),
-    unit: 'person-minutes wasted per flight',
+    value: fmtInt(worstVal),
+    unit: 'person-minutes idle per flight',
     infoKey: 'person-minutes',
+    dataAttrs: { 'data-arith-worst': String(worstVal) },
   }));
   grid.appendChild(tile({
-    label: 'Cost of the worst over the best',
-    subLabel: 'Per full flight',
-    value: formatPersonMinutes(diffIdle),
-    unit: 'person-minutes',
+    label: 'Cost of the wrong pick',
+    subLabel: `Worst minus best (${fmtInt(worstVal)} minus ${fmtInt(bestVal)})`,
+    value: fmtInt(diffVal),
+    unit: 'person-minutes gap per flight',
     infoKey: 'person-minutes',
+    dataAttrs: { 'data-arith-diff': String(diffVal) },
   }));
   grid.appendChild(tile({
-    label: 'If every US domestic flight used the worst',
-    subLabel: `About ${US_DAILY_DEPARTURES.toLocaleString('en-US')} departures a day`,
-    value: formatPersonYears(perDayPersonYears),
-    unit: 'person-years per day',
-    infoKey: 'measured-anchors',
+    label: 'That gap, across the country',
+    subLabel: `Same gap × about ${US_DAILY_DEPARTURES.toLocaleString('en-US')} US domestic departures a day`,
+    value: fmtPersonYears(perDayYears),
+    unit: 'person-years per day (difference)',
+    subUnit: 'difference between two strategies, not a total; estimate',
+    infoKey: 'per-day-scaled',
+    dataAttrs: { 'data-arith-scaled-years': perDayYears.toFixed(3) },
   }));
-
   host.appendChild(grid);
 
-  // Sub-line: average passenger idle time (m:ss) for the best strategy. The per-passenger
-  // figure is written into each strategy row by the precompute worker (see
-  // tools/precompute.mjs finaliseStrategy), so prefer it and only recompute from person
-  // minutes if it is missing (an older cell file).
+  // Below-tiles honest comparison rows. Boarding gets three; deplaning gets one summary line
+  // pointing to the "best vs slowest" reading already in the tile row.
+  if (mode === 'board' && refs.bestTextbook && refs.random && refs.bestAirline && refs.averageAirlineIdle != null) {
+    const compGrid = document.createElement('div');
+    compGrid.className = 'rankings-stats-comparisons';
+    const bestTextbookYears = personYearsFromPersonMinutes(Math.max(0, refs.random.idlePersonMinutesMedian - refs.bestTextbook.idlePersonMinutesMedian));
+    const bestAirlineYears = personYearsFromPersonMinutes(Math.max(0, refs.random.idlePersonMinutesMedian - refs.bestAirline.idlePersonMinutesMedian));
+    const airlineGapYears = personYearsFromPersonMinutes(Math.max(0, refs.averageAirlineIdle - refs.bestTextbook.idlePersonMinutesMedian));
+    for (const row of [
+      {
+        head: 'Best textbook method vs random order',
+        detail: `${refs.bestTextbook.label} vs ${refs.random.label}`,
+        value: `${fmtPersonYears(bestTextbookYears)} person-years / day`,
+      },
+      {
+        head: 'Best airline vs random order',
+        detail: `${refs.bestAirline.label} vs ${refs.random.label}`,
+        value: `${fmtPersonYears(bestAirlineYears)} person-years / day`,
+      },
+      {
+        head: 'Average airline vs best textbook method',
+        detail: `${refs.averageAirlineCount} airline procedures, mean idle vs ${refs.bestTextbook.label}`,
+        value: `${fmtPersonYears(airlineGapYears)} person-years / day`,
+      },
+    ]) {
+      compGrid.appendChild(comparisonRow(row));
+    }
+    const foot = document.createElement('p');
+    foot.className = 'rankings-stats-comparisons-note';
+    foot.textContent = 'Every per-day number is a scaled estimate; the sim runs at 153 pax on an A320, not a fleet-weighted mix.';
+    host.appendChild(compGrid);
+    host.appendChild(foot);
+  }
+
+  // Sub-line: average-passenger idle time for the best strategy.
   const avgIdleMinutes = Number.isFinite(best.idlePersonMinutesPerPassenger)
     ? best.idlePersonMinutesPerPassenger
-    : (passengerCount > 0 ? bestIdlePerFlight / passengerCount : 0);
+    : (passengerCount > 0 ? best.idlePersonMinutesMedian / passengerCount : 0);
   const line = document.createElement('p');
   line.className = 'rankings-stats-sub';
-  line.textContent = `The average passenger on ${best.label} sits going nowhere for ${formatClock(avgIdleMinutes * 60)}.`;
+  line.textContent = `The average passenger on ${best.label} sits going nowhere for ${fmtClock(avgIdleMinutes * 60)}.`;
   host.appendChild(line);
 
   return { host };
 }
 
-function tile({ label, subLabel, value, unit, infoKey }) {
+function tile({ label, subLabel, value, unit, subUnit, infoKey, dataAttrs }) {
   const wrap = document.createElement('div');
   wrap.className = 'rankings-stat-tile';
+  if (dataAttrs) for (const [key, val] of Object.entries(dataAttrs)) wrap.setAttribute(key, val);
   const header = document.createElement('div');
   header.className = 'rankings-stat-header';
   const labelSpan = document.createElement('span');
@@ -130,33 +199,63 @@ function tile({ label, subLabel, value, unit, infoKey }) {
     sub.textContent = subLabel;
     wrap.appendChild(sub);
   }
+  if (subUnit) {
+    const sub = document.createElement('div');
+    sub.className = 'rankings-stat-sublabel rankings-stat-sublabel-secondary';
+    sub.textContent = subUnit;
+    wrap.appendChild(sub);
+  }
   return wrap;
 }
 
-function pickBestWorst(strategies) {
-  if (!Array.isArray(strategies) || strategies.length < 2) return null;
-  const sorted = [...strategies].sort((a, b) => a.idlePersonMinutesMedian - b.idlePersonMinutesMedian);
-  return { best: sorted[0], worst: sorted[sorted.length - 1] };
+function comparisonRow({ head, detail, value }) {
+  const row = document.createElement('div');
+  row.className = 'rankings-comparison-row';
+  const left = document.createElement('div');
+  left.className = 'rankings-comparison-text';
+  const headEl = document.createElement('span');
+  headEl.className = 'rankings-comparison-head';
+  headEl.textContent = head;
+  const detailEl = document.createElement('span');
+  detailEl.className = 'rankings-comparison-detail';
+  detailEl.textContent = detail;
+  left.appendChild(headEl);
+  left.appendChild(detailEl);
+  const valEl = document.createElement('span');
+  valEl.className = 'rankings-comparison-value';
+  valEl.textContent = value;
+  row.appendChild(left);
+  row.appendChild(valEl);
+  return row;
 }
 
-function formatPersonMinutes(value) {
-  if (!Number.isFinite(value) || value <= 0) return '0';
-  if (value >= 1000) return `${Math.round(value / 10) * 10}`;
-  if (value >= 100) return `${Math.round(value)}`;
-  return `${Math.round(value * 10) / 10}`;
-}
-
-function formatPersonYears(value) {
-  if (!Number.isFinite(value) || value <= 0) return '0';
-  if (value >= 100) return String(Math.round(value));
-  if (value >= 10) return value.toFixed(1);
-  return value.toFixed(2);
-}
-
-function formatClock(seconds) {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-  const total = Math.round(seconds);
-  const minutes = Math.floor(total / 60);
-  const secs = total - minutes * 60;
-  return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+/**
+ * Collect the reference rows used by both the tile row and the comparison rows. When the
+ * cell has no airline strategies (deplaning), bestAirline stays null and the boarding-only
+ * comparison rows are simply skipped.
+ */
+function pickComparisonReferences(strategies) {
+  const byIdle = [...strategies].sort((a, b) => a.idlePersonMinutesMedian - b.idlePersonMinutesMedian);
+  const airlineRows = strategies.filter((r) => r.family === 'airline');
+  const textbookRows = strategies.filter((r) => (r.family || 'textbook') !== 'airline');
+  const random = strategies.find((r) => r.id === 'random');
+  const freeForAll = strategies.find((r) => r.id === 'free-for-all');
+  const bestTextbook = textbookRows
+    .filter((r) => r.id !== 'random')
+    .sort((a, b) => a.idlePersonMinutesMedian - b.idlePersonMinutesMedian)[0] || byIdle[0];
+  const bestAirline = airlineRows
+    .sort((a, b) => a.idlePersonMinutesMedian - b.idlePersonMinutesMedian)[0] || null;
+  let averageAirlineIdle = null;
+  if (airlineRows.length > 0) {
+    const sum = airlineRows.reduce((acc, r) => acc + (r.idlePersonMinutesMedian || 0), 0);
+    averageAirlineIdle = sum / airlineRows.length;
+  }
+  return {
+    bestOverall: byIdle[0],
+    worstOverall: byIdle[byIdle.length - 1],
+    bestTextbook, bestAirline,
+    averageAirlineIdle,
+    averageAirlineCount: airlineRows.length,
+    random, freeForAll,
+  };
 }

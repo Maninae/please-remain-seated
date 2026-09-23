@@ -8,7 +8,9 @@
     "test:e2e": "node --test tests/e2e/*.test.js",
     "serve": "python3 -m http.server 5197",
     "sim": "node tools/simulate.mjs",
-    "og": "node tools/og-image.mjs"
+    "og": "node tools/og-image.mjs",
+    "precompute": "node tools/precompute.mjs",
+    "precompute:preview": "node tools/precompute.mjs --preview"
   },
   "devDependencies": {
     "playwright": "1.58.2"

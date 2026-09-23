@@ -23,29 +23,41 @@ const INDEX_CANDIDATES = Object.freeze([
   { name: 'index-preview.json', preview: true },
 ]);
 
+// Module-level cache of the in-flight index-load promise. Both the main.js kickIndexLoad
+// and the rankings tab's own lazy-mount call loadRankingsIndex(); without a shared cache
+// each visit hit the network twice, producing the two 404s per visit N4-m9 flagged.
+let indexPromise = null;
+
 /**
  * Fetch the ranking index. Resolves with { indexUrl, indexObject } on success, or null if
- * no index file exists. The `previewOnly` flag is set by the caller if they want to force
- * the preview index (used only for local debugging).
+ * no index file exists. Caches the in-flight promise so concurrent callers share one HTTP
+ * round-trip (there is only one index; the same result is safe to hand back to everyone).
+ * The `previewOnly` flag is set by the caller if they want to force the preview index
+ * (used only for local debugging).
  */
 export async function loadRankingsIndex({ previewOnly = false } = {}) {
+  if (!previewOnly && indexPromise) return indexPromise;
   const attempts = previewOnly
     ? INDEX_CANDIDATES.filter((c) => c.preview)
     : INDEX_CANDIDATES;
-  for (const candidate of attempts) {
-    const url = `${RANKINGS_DIR}/${candidate.name}`;
-    try {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (!response.ok) continue;
-      const json = await response.json();
-      if (json && Array.isArray(json.cells) && json.cells.length > 0) {
-        return { indexUrl: url, indexObject: json, preview: candidate.preview };
+  const promise = (async () => {
+    for (const candidate of attempts) {
+      const url = `${RANKINGS_DIR}/${candidate.name}`;
+      try {
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) continue;
+        const json = await response.json();
+        if (json && Array.isArray(json.cells) && json.cells.length > 0) {
+          return { indexUrl: url, indexObject: json, preview: candidate.preview };
+        }
+      } catch (error) {
+        // Network error, JSON parse error: fall through to the next candidate.
       }
-    } catch (error) {
-      // Network error, JSON parse error: fall through to the next candidate.
     }
-  }
-  return null;
+    return null;
+  })();
+  if (!previewOnly) indexPromise = promise;
+  return promise;
 }
 
 /**

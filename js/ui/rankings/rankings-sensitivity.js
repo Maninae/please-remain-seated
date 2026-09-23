@@ -1,21 +1,21 @@
 /**
  * Sensitivity slope charts: one small chart per sensitivity knob for the current cell.
  *
- * Each slope chart plots the top five strategies' median minutes as lines across three points
- * on the x axis: LOW, DEFAULT, HIGH. Values come from the corresponding sensitivity cells
- * (one factor changed from the default at a time). Lines carry a small right-edge label with
- * the strategy name; no legend.
+ * Each slope chart plots the top five strategies' median minutes across the knob's grid
+ * values. Knobs with THREE cells (low, default, high) draw a three-point slope; knobs with
+ * only TWO cells (bins: default and legacy) draw a two-point slope. A degenerate "same cell
+ * twice" panel used to invent a symmetric dip out of thin air (N4-M9) and is gone.
  *
- * The chart title is computed from the data: which strategies' medians moved the most across
- * the knob's range, and which barely moved. That is the finding.
+ * Axis labels are the actual value names ("70%", "85%", "100%"; "light bags", "typical",
+ * "heavy bags"; "roomy bins", "old-style bins"), not "low / default / high". This closes
+ * N4-m6's axis-direction complaint too: bags now go from FEWER to MORE across every panel,
+ * matching the other knobs whose x runs low to high.
  *
- * Public API:
- *   renderSensitivitySlopes(host, { indexObject, headlineStrategies, sensitivityData, knobs,
- *     mode, preset })
+ * The chart title is computed from the data: which of the top-five strategies moved the most
+ * across the knob's range, and which barely moved. That is the finding.
  *
- * `sensitivityData` is a map from factor knob (`load`, `compliance`, `groups`, `bags`, `bins`)
- * to { low: cellData | null, high: cellData | null, defaults: cellData | null }. The caller
- * loads the cell files ahead of time so this module stays synchronous.
+ * `sensitivityData` is { knob -> { low: cellData, high: cellData } }. The caller loads the
+ * cell files before calling this module so this stays synchronous.
  */
 
 import { THEME } from '../../render/theme.js';
@@ -25,16 +25,14 @@ import {
 } from '../../render/charts-svg-dom.js';
 
 const CHART_HEIGHT = 200;
-const PADDING = { top: 44, right: 130, bottom: 30, left: 60 };
+const PADDING = { top: 44, right: 130, bottom: 34, left: 60 };
 const AXIS_FONT_PX = 10;
 const LABEL_FONT_PX = 11;
-const TITLE_FONT_PX = 13;
 const TOP_N = 5;
 
 /**
  * Render every knob's slope chart into `host`. Each chart becomes a section in a stack; the
- * host is emptied first. If no sensitivity data exists the module renders one muted line
- * explaining that.
+ * host is emptied first.
  */
 export function renderSensitivitySlopes(host, { headlineStrategies, sensitivityData, defaults }) {
   host.innerHTML = '';
@@ -49,8 +47,7 @@ export function renderSensitivitySlopes(host, { headlineStrategies, sensitivityD
   const topFive = pickTopFive(headlineStrategies);
   for (const knob of knobs) {
     const cells = sensitivityData[knob];
-    if (!cells) continue;
-    if (!cells.low || !cells.high) continue;
+    if (!cells || !cells.low || !cells.high) continue;
     const section = renderOneSlope(knob, cells, topFive, defaults);
     if (section) host.appendChild(section);
   }
@@ -70,6 +67,11 @@ function renderOneSlope(knob, cells, topFive, defaults) {
   heading.textContent = knobHeading(knob);
   wrap.appendChild(heading);
 
+  // Assemble the x-axis grid. Two-cell knobs (bins) render two points; three-cell knobs
+  // render three, with the headline default in the middle.
+  const points = buildPointsForKnob(knob, cells, defaults);
+  if (points.length < 2) return null;
+
   const container = document.createElement('div');
   container.className = 'rankings-slope-svg-wrap';
   wrap.appendChild(container);
@@ -82,33 +84,37 @@ function renderOneSlope(knob, cells, topFive, defaults) {
   });
   clearElement(svg);
 
-  const values = xValueLabelsFor(knob, cells, defaults);
-  const lows = mapStrategyById(cells.low.strategies || []);
-  const defs = mapStrategyById(topFive);
-  const highs = mapStrategyById(cells.high.strategies || []);
+  const highMap = mapStrategyById(cells.high.strategies || []);
+  const lowMap = mapStrategyById(cells.low.strategies || []);
+  const defsMap = mapStrategyById(topFive);
 
   const series = topFive.map((strategy) => {
-    const yLow = (lows.get(strategy.id) || {}).medianSeconds;
-    const yDef = (defs.get(strategy.id) || strategy).medianSeconds;
-    const yHigh = (highs.get(strategy.id) || {}).medianSeconds;
+    const values = points.map((p) => {
+      const source = p.kind === 'low' ? lowMap
+        : p.kind === 'high' ? highMap
+        : defsMap;
+      const record = source.get(strategy.id) || (p.kind === 'default' ? strategy : null);
+      return record && Number.isFinite(record.medianSeconds) ? record.medianSeconds : null;
+    });
     return {
-      id: strategy.id, label: strategy.label, family: strategy.family,
-      values: [yLow, yDef, yHigh].map((v) => (Number.isFinite(v) ? v : null)),
+      id: strategy.id, label: strategy.label, family: strategy.family, values,
     };
   }).filter((s) => s.values.some((v) => v !== null));
 
   const allYs = series.flatMap((s) => s.values.filter((v) => v !== null));
   const yMax = niceCeiling(Math.max(...allYs, 60));
   const yMin = 0;
-
   const plotX0 = PADDING.left;
   const plotX1 = width - PADDING.right;
   const plotY0 = PADDING.top;
   const plotY1 = height - PADDING.bottom;
-  const xPositions = [plotX0, (plotX0 + plotX1) / 2, plotX1];
 
-  // Axes: light baseline and a y label with min / mid / max.
-  for (let i = 0; i < 3; i += 1) {
+  const xPositions = points.length === 2
+    ? [plotX0, plotX1]
+    : [plotX0, (plotX0 + plotX1) / 2, plotX1];
+
+  // Gridlines: light dashed verticals and the value label under each.
+  for (let i = 0; i < xPositions.length; i += 1) {
     appendLine(svg, {
       x1: xPositions[i], x2: xPositions[i], y1: plotY0 - 6, y2: plotY1,
       stroke: THEME.rule, 'stroke-width': 0.4, 'stroke-dasharray': '2 3',
@@ -119,10 +125,21 @@ function renderOneSlope(knob, cells, topFive, defaults) {
       'text-anchor': 'middle',
       fill: THEME.ink,
       'fill-opacity': 0.6,
-    }, values[i]);
+    }, points[i].label);
+    // Second-line marker: "(default)" if applicable.
+    if (points[i].kind === 'default') {
+      appendText(svg, {
+        x: xPositions[i], y: plotY1 + 26,
+        'font-size': AXIS_FONT_PX - 1,
+        'text-anchor': 'middle',
+        fill: THEME.ink,
+        'fill-opacity': 0.5,
+        'font-style': 'italic',
+      }, '(default)');
+    }
   }
 
-  // Y axis labels (0 / mid / max minutes).
+  // Y axis ticks (0, mid, max minutes).
   const yTicks = [yMax, yMax / 2, 0];
   for (const seconds of yTicks) {
     const y = plotY1 - (seconds - yMin) / (yMax - yMin) * (plotY1 - plotY0);
@@ -135,73 +152,131 @@ function renderOneSlope(knob, cells, topFive, defaults) {
     }, `${Math.round(seconds / 60)}m`);
   }
 
-  // One line per strategy. Compute right-edge label y positions first, then adjust upward
-  // so labels never overlap within a minimum vertical gap.
+  // Draw lines and dots.
   const linePoints = series.map((s) => s.values.map((seconds, idx) => {
     if (seconds === null) return null;
     const y = plotY1 - (seconds - yMin) / (yMax - yMin) * (plotY1 - plotY0);
     return { x: xPositions[idx], y };
   }));
-
-  // Draw all lines / dots first (their exact y is truth), then labels with the collision-fix
-  // pass on the right edge.
   for (let i = 0; i < series.length; i += 1) {
     const s = series[i];
     const color = s.family === 'airline' ? THEME.ink : THEME.blocked;
     const opacity = 0.7;
-    const points = linePoints[i];
-    for (let idx = 0; idx < points.length - 1; idx += 1) {
-      const a = points[idx];
-      const b = points[idx + 1];
+    const ptsForSeries = linePoints[i];
+    for (let idx = 0; idx < ptsForSeries.length - 1; idx += 1) {
+      const a = ptsForSeries[idx];
+      const b = ptsForSeries[idx + 1];
       if (!a || !b) continue;
       appendLine(svg, {
         x1: a.x, x2: b.x, y1: a.y, y2: b.y,
         stroke: color, 'stroke-width': 1.6, 'stroke-opacity': opacity,
       });
     }
-    for (const p of points) {
+    for (const p of ptsForSeries) {
       if (!p) continue;
       appendCircle(svg, {
         cx: p.x, cy: p.y, r: 3, fill: color, 'fill-opacity': opacity,
       });
     }
-    void s;
   }
 
-  // Right-edge label placement with minimum vertical gap.
+  // Right-edge labels with leader lines. If the endpoint of a series is missing (some knob's
+  // second cell did not include this strategy), fall back to the previous point.
   const MIN_LABEL_GAP = LABEL_FONT_PX + 2;
-  const rightLabels = series
-    .map((s, i) => ({ s, y: linePoints[i][linePoints[i].length - 1]?.y }))
-    .filter((entry) => Number.isFinite(entry.y))
-    .sort((a, b) => a.y - b.y);
-  for (let i = 1; i < rightLabels.length; i += 1) {
-    if (rightLabels[i].y - rightLabels[i - 1].y < MIN_LABEL_GAP) {
-      rightLabels[i].y = rightLabels[i - 1].y + MIN_LABEL_GAP;
+  const rightEnds = series.map((s, i) => {
+    const pts = linePoints[i];
+    for (let idx = pts.length - 1; idx >= 0; idx -= 1) {
+      if (pts[idx]) return { s, x: pts[idx].x, targetY: pts[idx].y };
+    }
+    return null;
+  }).filter(Boolean).sort((a, b) => a.targetY - b.targetY);
+  for (let i = 1; i < rightEnds.length; i += 1) {
+    if (rightEnds[i].targetY - rightEnds[i - 1].targetY < MIN_LABEL_GAP) {
+      rightEnds[i].labelY = (rightEnds[i - 1].labelY ?? rightEnds[i - 1].targetY) + MIN_LABEL_GAP;
     }
   }
-  for (const { s, y } of rightLabels) {
+  for (const entry of rightEnds) {
+    const labelY = entry.labelY ?? entry.targetY;
+    // Short leader line from the endpoint to the label baseline, so a label pushed off its
+    // line by the collision-fix pass still points back to its data (N4-m6).
+    if (Math.abs(labelY - entry.targetY) > 1.5) {
+      appendLine(svg, {
+        x1: entry.x + 3, x2: plotX1 + 5, y1: entry.targetY, y2: labelY,
+        stroke: THEME.ink, 'stroke-opacity': 0.30, 'stroke-width': 0.6,
+      });
+    }
     appendText(svg, {
-      x: plotX1 + 8, y: y + 3,
+      x: plotX1 + 8, y: labelY + 3,
       'font-size': LABEL_FONT_PX,
       fill: THEME.ink,
-    }, truncateLabel(s.label));
+    }, truncateLabel(entry.s.label));
   }
 
-  // Title: computed. Move-magnitude per strategy across the knob's range.
-  const title = computeSlopeTitle(knob, series);
+  const title = computeSlopeTitle(knob, series, points);
   if (title) {
     const t = document.createElement('p');
     t.className = 'rankings-slope-title';
     t.textContent = title;
     wrap.insertBefore(t, container);
   }
-
   return wrap;
 }
 
-function xValueLabelsFor(knob, cells, defaults) {
-  const label = (value) => (typeof value === 'string' ? value : `${Math.round(value * 100)}%`);
-  return [label(cells.low.cell.knobs[knob]), 'default', label(cells.high.cell.knobs[knob])];
+/**
+ * Build the {kind, label, value} triples for one knob's x-axis. Numeric knobs
+ * (load/compliance/groups) render three points; bags renders three (light/default/heavy);
+ * bins renders two (roomy default and legacy). The order is always low to high so an upward
+ * slope means "worse" in every panel (N4-m6).
+ */
+function buildPointsForKnob(knob, cells, defaults) {
+  if (knob === 'bins') {
+    // Two-cell case: the sensitivity file for bins is always the legacy cell.
+    const lowValue = cells.low.cell.knobs.bins;
+    return [
+      { kind: 'default', label: labelForKnobValue('bins', defaults.bins), value: defaults.bins },
+      { kind: 'low', label: labelForKnobValue('bins', lowValue), value: lowValue },
+    ];
+  }
+  if (knob === 'bags') {
+    // Categorical order: fewer bags -> default -> more bags, matching the "less to more" x of
+    // the other panels.
+    const lowValue = cells.low.cell.knobs.bags;
+    const highValue = cells.high.cell.knobs.bags;
+    const orderRank = { light: 0, default: 1, heavy: 2 };
+    const lowFirst = (orderRank[lowValue] ?? 0) <= (orderRank[highValue] ?? 2);
+    const first = lowFirst ? lowValue : highValue;
+    const last = lowFirst ? highValue : lowValue;
+    const firstKind = lowFirst ? 'low' : 'high';
+    const lastKind = lowFirst ? 'high' : 'low';
+    return [
+      { kind: firstKind, label: labelForKnobValue('bags', first), value: first },
+      { kind: 'default', label: labelForKnobValue('bags', defaults.bags), value: defaults.bags },
+      { kind: lastKind, label: labelForKnobValue('bags', last), value: last },
+    ];
+  }
+  // Numeric knobs: three-point slope in ascending order.
+  const lowValue = cells.low.cell.knobs[knob];
+  const highValue = cells.high.cell.knobs[knob];
+  const first = Math.min(lowValue, highValue);
+  const last = Math.max(lowValue, highValue);
+  const firstKind = first === lowValue ? 'low' : 'high';
+  const lastKind = last === highValue ? 'high' : 'low';
+  return [
+    { kind: firstKind, label: labelForKnobValue(knob, first), value: first },
+    { kind: 'default', label: labelForKnobValue(knob, defaults[knob]), value: defaults[knob] },
+    { kind: lastKind, label: labelForKnobValue(knob, last), value: last },
+  ];
+}
+
+function labelForKnobValue(knob, value) {
+  if (knob === 'bags') {
+    if (value === 'light') return 'light bags';
+    if (value === 'heavy') return 'heavy bags';
+    return 'typical bags';
+  }
+  if (knob === 'bins') return value === 'legacy' ? 'old-style bins' : 'roomy bins';
+  if (typeof value === 'number') return `${Math.round(value * 100)}%`;
+  return String(value);
 }
 
 function knobHeading(knob) {
@@ -221,23 +296,28 @@ function mapStrategyById(rows) {
   return map;
 }
 
-function computeSlopeTitle(knob, series) {
-  if (!series || series.length === 0) return '';
+/**
+ * Title: which strategies moved most across the knob's range, and by how much. For a
+ * two-point knob (bins) the delta is (high - low); for a three-point knob we take (last -
+ * first) as the total swing, since the middle is the default and both flanks are informative.
+ */
+function computeSlopeTitle(knob, series, points) {
+  if (!series || series.length === 0 || points.length < 2) return '';
+  const firstIdx = 0;
+  const lastIdx = points.length - 1;
   const moves = series
-    .filter((s) => s.values[0] !== null && s.values[2] !== null)
-    .map((s) => ({ id: s.id, label: s.label, delta: Math.abs(s.values[2] - s.values[0]) }));
+    .filter((s) => s.values[firstIdx] !== null && s.values[lastIdx] !== null)
+    .map((s) => ({ id: s.id, label: s.label, delta: Math.abs(s.values[lastIdx] - s.values[firstIdx]) }));
   if (moves.length === 0) return '';
   moves.sort((a, b) => b.delta - a.delta);
   const largest = moves[0];
   const smallest = moves[moves.length - 1];
-  const label = knobHeadingLower(knob);
-  if (largest.id === smallest.id) return `${label} moves ${truncateLabel(largest.label)} by ${formatDelta(largest.delta)}.`;
-  if (largest.delta < 20) return `${label} barely moves any of the top strategies.`;
-  return `${label} makes or breaks ${truncateLabel(largest.label)}; ${truncateLabel(smallest.label)} barely moves.`;
-}
-
-function knobHeadingLower(knob) {
-  return knobHeading(knob);
+  const label = knobHeading(knob);
+  if (largest.id === smallest.id || moves.length === 1) {
+    return `${label} moves ${truncateLabel(largest.label)} by ${formatDelta(largest.delta)}.`;
+  }
+  if (largest.delta < 20) return `${label} has a small effect on the top strategies.`;
+  return `${label} has the largest effect on ${truncateLabel(largest.label)}; ${truncateLabel(smallest.label)} barely moves.`;
 }
 
 function formatDelta(seconds) {

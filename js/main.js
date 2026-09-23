@@ -223,6 +223,8 @@ function boot() {
         generationRef.current = {
           generatedAt: result.indexObject.generatedAt,
           engineVersion: result.indexObject.engineVersion,
+          seedTiers: result.indexObject.seedTiers,
+          preview: result.indexObject.preview,
         };
         window.dispatchEvent(new CustomEvent('prs:rankings-index-loaded', { detail: generationRef.current }));
       }

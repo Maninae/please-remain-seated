@@ -417,13 +417,17 @@ function drawOneSectionLabel(ctx, g, text, longAt, fuselage, gutter, fontPx, isF
   if (!text) return;
   if (g.horizontal) {
     // Ink label in light gray sitting above the fuselage next to the divider (or the fuselage
-    // fore corner for the first section).
+    // fore corner for the first section). If a top-side door glyph falls within the label's
+    // horizontal reach past longAt (N4-m3: the forward first-class label used to read
+    // "Fiıst" with the door arrow drawn through the "r"), shift the label past the door.
     ctx.fillStyle = THEME.ink;
     ctx.globalAlpha = 0.55;
     ctx.textAlign = 'left';
-    const x = isFore ? longAt + 4 : longAt + gutter;
+    const baseX = isFore ? longAt + 4 : longAt + gutter;
+    const textWidthPx = ctx.measureText(text).width;
+    const clearedX = clearHorizontalLabelPastDoors(baseX, textWidthPx, fuselage, isFore, gutter);
     const y = fuselage.y - gutter - fontPx / 2;
-    ctx.fillText(text, x, y);
+    ctx.fillText(text, clearedX, y);
     ctx.globalAlpha = 1;
     return;
   }
@@ -458,6 +462,41 @@ function drawOneSectionLabel(ctx, g, text, longAt, fuselage, gutter, fontPx, isF
   ctx.globalAlpha = 0.7;
   ctx.fillText(text, centreX, centreY);
   ctx.globalAlpha = 1;
+}
+
+/**
+ * Return the label's x, shifted past any top-side door glyph that would overlap the label
+ * horizontally. Horizontal cabins draw door arrows on the top face of the fuselage; each
+ * arrow's midX is (gap.x1 + gap.x2) / 2 with a small chevron head. If the label starts at
+ * baseX and its span [baseX, baseX + textWidthPx] intersects a top-side gap's midpoint, we
+ * push the label right so it starts past the door's chevron. Used by drawOneSectionLabel;
+ * the shifted x is bounded by the fuselage's right edge so we never push a label off-plane.
+ */
+function clearHorizontalLabelPastDoors(baseX, textWidthPx, fuselage, isFore, gutter) {
+  if (!fuselage || !Array.isArray(fuselage.doorGaps) || fuselage.doorGaps.length === 0) return baseX;
+  const clearance = Math.max(6, gutter || 6);
+  const labelEnd = baseX + textWidthPx;
+  let cursor = baseX;
+  for (const gap of fuselage.doorGaps) {
+    if (gap.side !== 'top' && gap.side !== 'bottom') continue;
+    if (gap.side === 'bottom') continue;   // labels sit above the fuselage; only top-side arrows collide.
+    const doorLeft = Math.min(gap.x1, gap.x2);
+    const doorRight = Math.max(gap.x1, gap.x2);
+    // The door "keep-out" zone is the door mouth plus a little margin either side for the
+    // chevron head — 8 px on each side comfortably clears the DOOR_ARROW head geometry.
+    const keepOutLeft = doorLeft - 8;
+    const keepOutRight = doorRight + 8;
+    if (cursor < keepOutRight && labelEnd + clearance > keepOutLeft) {
+      const pushed = keepOutRight + clearance;
+      if (pushed > cursor) cursor = pushed;
+    }
+  }
+  if (fuselage.width) {
+    const maxX = fuselage.x + fuselage.width - textWidthPx - 2;
+    if (cursor > maxX) cursor = Math.max(baseX, maxX);
+  }
+  void isFore;
+  return cursor;
 }
 
 function drawPassengers(ctx, g, passengers) {
