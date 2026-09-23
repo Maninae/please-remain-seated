@@ -52,27 +52,34 @@ export function mountControls({ store, sound, race }) {
   }
 
   function bindPrimaryButton() {
-    const button = document.getElementById('btn-race');
-    if (!button) return;
-    button.addEventListener('click', () => race.restart());
+    // Both the main-column Restart and the sidebar Restart route through the same race handle,
+    // so the sidebar copy is a real second control, not just a mirror.
+    for (const id of ['btn-race', 'btn-race-side']) {
+      const button = document.getElementById(id);
+      if (button) button.addEventListener('click', () => race.restart());
+    }
   }
 
   function bindSpeedGroup(current) {
-    const group = document.getElementById('speed-group');
-    if (!group) return;
-    const buttons = group.querySelectorAll('.seg[data-speed]');
-    for (const button of buttons) {
-      const speed = Number(button.dataset.speed);
-      button.setAttribute('aria-checked', String(speed === current));
-      button.classList.toggle('on', speed === current);
-      button.addEventListener('click', () => {
-        for (const other of buttons) {
-          const otherSpeed = Number(other.dataset.speed);
-          other.setAttribute('aria-checked', String(otherSpeed === speed));
-          other.classList.toggle('on', otherSpeed === speed);
-        }
-        race.setSpeed(speed);
-      });
+    // The main column carries the compact speed pips (near the cabins). The sidebar carries
+    // the same pips grouped with the other settings. Selecting either updates both groups so
+    // there is one consistent "current speed" across the page.
+    const groups = ['speed-group', 'speed-group-side']
+      .map((id) => document.getElementById(id))
+      .filter(Boolean);
+    const allButtons = [];
+    for (const group of groups) {
+      const buttons = group.querySelectorAll('.seg[data-speed]');
+      for (const button of buttons) {
+        const speed = Number(button.dataset.speed);
+        button.setAttribute('aria-checked', String(speed === current));
+        button.classList.toggle('on', speed === current);
+        allButtons.push(button);
+        button.addEventListener('click', () => {
+          syncSpeedButtons(speed);
+          race.setSpeed(speed);
+        });
+      }
     }
   }
 
@@ -95,13 +102,16 @@ export function mountControls({ store, sound, race }) {
   }
 
   function populatePresetSelect(currentId) {
+    // The layout numbers stay in the option text because people recognise 3-3 and 2-3-2 by
+    // shape. The plain label carries the aircraft name and seat count.
     const select = document.getElementById('preset-select');
     if (!select) return;
     select.innerHTML = '';
     for (const preset of CABIN_PRESETS) {
       const option = document.createElement('option');
       option.value = preset.id;
-      option.textContent = `${preset.label} · ${preset.layout.join('-')} · ${preset.rows * preset.layout.reduce((a, b) => a + b, 0)} seats`;
+      const seats = preset.rows * preset.layout.reduce((a, b) => a + b, 0);
+      option.textContent = `${preset.label} · ${preset.layout.join('-')} · ${seats} seats`;
       if (preset.id === currentId) option.selected = true;
       select.appendChild(option);
     }
@@ -253,13 +263,17 @@ export function mountControls({ store, sound, race }) {
   }
 
   function syncSpeedButtons(target) {
-    const group = document.getElementById('speed-group');
-    if (!group) return;
-    const buttons = group.querySelectorAll('.seg[data-speed]');
-    for (const button of buttons) {
-      const match = Number(button.dataset.speed) === target;
-      button.setAttribute('aria-checked', String(match));
-      button.classList.toggle('on', match);
+    // Sync both speed groups (main compact + sidebar) so the selection is visible wherever
+    // the user is looking.
+    for (const id of ['speed-group', 'speed-group-side']) {
+      const group = document.getElementById(id);
+      if (!group) continue;
+      const buttons = group.querySelectorAll('.seg[data-speed]');
+      for (const button of buttons) {
+        const match = Number(button.dataset.speed) === target;
+        button.setAttribute('aria-checked', String(match));
+        button.classList.toggle('on', match);
+      }
     }
   }
 

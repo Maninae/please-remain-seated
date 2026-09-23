@@ -15,16 +15,16 @@ export function mountExplainer({ store }) {
     // retrieval all proceed during the staging window before the door opens. State the model
     // truthfully.
     const modeLine = state.mode === 'deplane'
-      ? 'Deplaning today: the seatbelt sign goes off, people stand and prep, and rows start filling the aisle. The door opens after a short staging window. From there anyone still READY can stand if their row-mates are out and the aisle cell beside them is free.'
-      : 'Boarding today: passengers arrive at the door on an exponential inter-arrival, walk aft, and stow at their bin (or the next one with space).';
+      ? 'When the seatbelt sign turns off, people get up, prep their things, and start filling the aisle. The door opens after a short pause. From then on anyone whose row is clear and whose slot in the aisle is free can stand up and walk.'
+      : 'People arrive at the gate one at a time, walk toward the back of the plane, and stow their bag at (or near) their row before sitting down.';
     body.innerHTML = `
       <ul>
         <li>${modeLine}</li>
-        <li>Every bag retrieval blocks its aisle cell. Nothing behind a stopped person moves. That is the whole story.</li>
-        <li>Walking is about 0.8 m/s. Prep is usually 2-3 seconds, with a long tail of distracted passengers who take much longer to notice the aisle. Bag retrieval is usually about 9 seconds; stowing is longer. Numbers taken from Schultz 2018 and Milne and Salari 2016.</li>
-        <li>Compliance and families are the killers. Free-for-all is what actually happens; the classroom-optimal orderings assume everybody plays along.</li>
-        <li>Opening the rear door cuts deplaning time meaningfully: each half of the plane drains through its own exit instead of queueing behind the front door.</li>
-        <li>Every strategy above rides the same physics. Change the sliders and the winner may flip; this is why airlines cannot promise a boarding time.</li>
+        <li>Every bag pull or stow blocks the aisle slot it happens in. Nothing behind a stopped person moves. That is the whole story.</li>
+        <li>People walk about 0.8 metres per second. Getting up takes about 2 to 3 seconds for most people, longer for anyone on a phone. Pulling a bag takes about 9 seconds; stowing one takes longer. The numbers come from research by Schultz (2018) and Milne and Salari (2016).</li>
+        <li>How well people follow the announced order matters more than which order gets announced. When most people ignore the rule, every fancy strategy collapses into free-for-all.</li>
+        <li>Opening the back door is by far the biggest win. Each half of the plane drains through its own exit instead of queueing behind the front door.</li>
+        <li>Every strategy above rides the same physics. Change a slider and the winner may flip. That is why airlines cannot promise a boarding time.</li>
       </ul>
       <p>Spec: <a href="https://github.com/Maninae/please-remain-seated/blob/main/design/01-spec.md" target="_blank" rel="noopener">design/01-spec.md</a> &middot; Research: <a href="https://github.com/Maninae/please-remain-seated/blob/main/design/02-research.md" target="_blank" rel="noopener">design/02-research.md</a></p>
     `;

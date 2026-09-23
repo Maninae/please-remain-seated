@@ -44,7 +44,7 @@ function scratchFor(state, strategyId, build) {
 const FREE_FOR_ALL = {
   id: 'free-for-all',
   label: 'Free-for-all',
-  blurb: 'The seatbelt sign turns off and everybody stands. This is what actually happens on a plane.',
+  blurb: 'The seatbelt sign goes off and everyone stands up. This is what actually happens.',
   canLeaveSeat() { return true; },
 };
 
@@ -74,8 +74,8 @@ function rowByRowScratch(state) {
 
 const ROW_BY_ROW = {
   id: 'row-by-row',
-  label: 'Row-by-row',
-  blurb: 'Row 1 stands and leaves. Row 2 does not stand until every row-1 passenger is out of the seat, then row 3 waits on row 2, and so on. The strictest possible waiting order.',
+  label: 'One row at a time',
+  blurb: 'Row 1 leaves, then row 2, then row 3. Nobody else stands until their turn.',
   canLeaveSeat(passenger, state) {
     const data = scratchFor(state, 'row-by-row', () => rowByRowScratch(state));
     return passenger.row <= data.clearedThroughByAisle[passenger.aisleIndex] + 1;
@@ -114,8 +114,8 @@ function aisleFirstScratch(state) {
 
 const AISLE_FIRST = {
   id: 'aisle-first',
-  label: 'Aisle first',
-  blurb: 'Everyone with an aisle seat leaves first, then the middles, then the windows.',
+  label: 'Aisle seats first',
+  blurb: 'Aisle seats leave first, then the middles, then the windows.',
   canLeaveSeat(passenger, state) {
     const data = scratchFor(state, 'aisle-first', () => aisleFirstScratch(state));
     return passenger.seatDepth <= data.lowestSeatedDepth[passenger.aisleIndex];
@@ -144,8 +144,8 @@ function alternatingRowsScratch(state) {
 
 const ALTERNATING_ROWS = {
   id: 'alternating-rows',
-  label: 'Alternating rows',
-  blurb: 'Even rows first, then odd rows, so bag retrievals happen one row apart.',
+  label: 'Every other row',
+  blurb: 'Even rows go first, then odd rows, so bag pulls happen one row apart.',
   canLeaveSeat(passenger, state) {
     const data = scratchFor(state, 'alternating-rows', () => alternatingRowsScratch(state));
     if (passenger.row % 2 === 0) return true;
@@ -157,8 +157,8 @@ const ALTERNATING_ROWS = {
 
 const TWO_DOORS = {
   id: 'two-doors',
-  label: 'Two doors',
-  blurb: 'The rear door opens too. Everyone leaves through the door nearest to them.',
+  label: 'Both doors',
+  blurb: 'The back door opens too. Everyone leaves through the nearer door.',
   canLeaveSeat() { return true; },
   cabinOverrides: { rearDoor: true },
 };
@@ -192,8 +192,8 @@ function baglessFirstScratch(state) {
 
 const BAGLESS_FIRST = {
   id: 'bagless-first',
-  label: 'Bagless first',
-  blurb: 'Anyone with no overhead bag leaves before anyone with a bag stands up.',
+  label: 'No bags first',
+  blurb: 'Anyone without an overhead bag leaves before people with bags stand up.',
   canLeaveSeat(passenger, state) {
     if (passenger.bagCount === 0) return true;
     const data = scratchFor(state, 'bagless-first', () => baglessFirstScratch(state));
@@ -233,8 +233,8 @@ function backToFrontScratch(state) {
 
 const BACK_TO_FRONT = {
   id: 'back-to-front',
-  label: 'Back-to-front',
-  blurb: 'The aftmost row stands and leaves. The row ahead of it does not stand until every one of its rear neighbours is out of the seat, and so on toward row 1. The strict mirror of row-by-row.',
+  label: 'Back to front',
+  blurb: 'The last row leaves first, then the row in front of it, and so on to row 1.',
   canLeaveSeat(passenger, state) {
     const data = scratchFor(state, 'back-to-front', () => backToFrontScratch(state));
     return passenger.row >= data.clearedFromBack[passenger.aisleIndex] - 1;

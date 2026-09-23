@@ -134,8 +134,10 @@ test('compare batch: two doors saves at least 90 seconds over free-for-all (B1)'
     }, { timeout: 120000 });
     await page.waitForTimeout(500);
     const finding = await page.$eval('#strips-wrap svg text', (el) => el.textContent);
-    // The strategy at the top of the sorted strips must be two-doors, saving many seconds.
-    assert.ok(/Two doors/.test(finding), `strips title should mention Two doors: "${finding}"`);
+    // The strategy at the top of the sorted strips must be two-doors, saving many seconds. The
+    // strategy id is stable ("two-doors"), but the display label was renamed to "Both doors" in
+    // the plain-language pass; the test accepts either historical label.
+    assert.ok(/Both doors|Two doors/.test(finding), `strips title should mention Both doors: "${finding}"`);
     assert.ok(/saves/.test(finding), `strips title should say saves: "${finding}"`);
     // A saving of at least 1:30 (well over the "0.00" bug we started with).
     const match = /saves (\d+):(\d{2})/.exec(finding);
@@ -159,8 +161,15 @@ test('finish card and time-split shared scale (B2, M11)', async (t) => {
     await page.waitForSelector('[data-canvas="a"]');
     await page.click('[data-speed="60"]');
 
-    await page.waitForFunction(() => document.querySelectorAll('.cabin-card.winner').length >= 1, { timeout: 60000 });
-    await page.waitForTimeout(4000);   // give both lanes time to finish
+    // Wait for BOTH margins to carry their final "ahead" / "later" text. The prior
+    // `.cabin-card.winner >= 1` + fixed 4-second sleep was the flake source: on a slow
+    // machine only the fast lane finished within the sleep window. A state-driven wait
+    // handles any machine speed.
+    await page.waitForFunction(() => {
+      const marginA = document.querySelector('[data-margin="a"]').textContent;
+      const marginB = document.querySelector('[data-margin="b"]').textContent;
+      return /(ahead|later)/.test(marginA) && /(ahead|later)/.test(marginB);
+    }, { timeout: 60000 });
 
     // M11: the loser's margin cell shows "finished X later", never empty.
     const laneAMargin = await page.$eval('[data-margin="a"]', (el) => el.textContent);
@@ -213,8 +222,15 @@ test('finish scroll and heat view (NEW-B1 and worst-seats)', async (t) => {
     await page.waitForSelector('[data-canvas="a"]');
     await page.click('[data-speed="60"]');
 
-    await page.waitForFunction(() => document.querySelectorAll('.cabin-card.winner').length >= 1, { timeout: 60000 });
-    await page.waitForTimeout(3500);
+    // Wait for BOTH margins to settle, and for the body to enter finish-mode. The prior
+    // `.cabin-card.winner >= 1` + fixed 3.5-second sleep was the flake source (one of ten
+    // runs on the lead's machine failed at this exact step). A state condition removes it.
+    await page.waitForFunction(() => {
+      const marginA = document.querySelector('[data-margin="a"]').textContent;
+      const marginB = document.querySelector('[data-margin="b"]').textContent;
+      return document.body.classList.contains('finish-mode')
+        && /(ahead|later)/.test(marginA) && /(ahead|later)/.test(marginB);
+    }, { timeout: 60000 });
 
     // NEW-B1: the finish card must be fully in view at 1280x800 after finish scroll.
     const cardVisibility = await page.evaluate(() => {

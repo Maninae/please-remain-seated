@@ -7,10 +7,11 @@ Agent-based airplane deplaning and boarding simulator. Two cabins race the same 
 ## Architecture
 
 ```
-index.html                    page shell (ES module entry); race cards, controls, time-split, compare, explainer
+index.html                    page shell (ES module entry); race cards, race controls, time-split, compare, explainer, sidebar
 css/base.css                  design tokens (mirrors js/render/theme.js), type scale, page layout
-css/race.css                  cabin cards, clocks, control bar
+css/race.css                  cabin cards, clocks, race controls (Restart, speed, worst-seats toggle)
 css/charts.css                strip chart + time-split bar styles
+css/sidebar.css               two-column grid, sticky sidebar, phone drawer, info popover styling
 
 js/main.js                    bootstrap only: reads the URL, mounts race/controls/compare/explainer/sound/finish-card, wires the store
 js/batch.js                   headless Monte Carlo: run a sim to completion across many seeds, report median/p10/p90
@@ -68,15 +69,19 @@ js/ui/                        DOM, driven by the store.
   personal-best.js               best MARGIN per (mode, preset, winner-vs-loser, key knobs) in localStorage
   explainer.js                   "how this works" copy
   sound.js                       seatbelt-chime WebAudio, off by default
-  format.js                      shared formatters (clock, percent, finding sentence)
+  format.js                      shared formatters (clock, percent, finding sentence); formatClock rounds and carries so seconds never render as 60
   canvas-sizing.js               cabin canvas height derived from the layout, not a fixed constant
+  glossary.js                    plain-language popover content, keyed by id (strategy id, preset id, or setting slug like "how-full")
+  info-popover.js                round "i" button + anchored popover, keyboard-driven, one open at a time
+  settings-drawer.js             phone-only settings drawer: open/close, focus trap, Escape and tap-outside close, body scroll lock
 
 tools/simulate.mjs            CLI: headless Monte Carlo table (median / p10 / p90 / throughput per strategy)
 tools/og-image.mjs            Playwright screenshotter: writes media/og.png from a finished race (npm run og)
 
-tests/unit/*.test.js          node --test: engine invariants + the calibration gates
+tests/unit/*.test.js          node --test: engine invariants + the calibration gates; format.test.js guards the 0:60 formatter fix
 tests/e2e/shot.js             desktop + phone screenshot capture, starts the dev server if needed
 tests/e2e/smoke.test.js       Playwright smoke test
+tests/e2e/sidebar-popover.test.js  Round-04 e2e: sidebar layout at 1280 px, phone drawer at 400 px with focus trap, strategy info popover, no ":60" labels
 
 design/01-spec.md             the model, the thesis, the calibration gates
 design/02-research.md         every measured parameter, with its source

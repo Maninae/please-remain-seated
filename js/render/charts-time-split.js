@@ -21,6 +21,7 @@ import {
   ensureSvg, clearElement, setAttrs, readNumericAttr,
   appendRect, appendText,
 } from './charts-svg-dom.js';
+import { formatClock } from '../ui/format.js';
 
 const TIMESPLIT_HEIGHT_PX = 42;
 const TIMESPLIT_LABEL_FONT_PX = 12;
@@ -114,10 +115,9 @@ export function renderTimeSplit(host, split, options = {}) {
 }
 
 function formatMinutesSeconds(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds - m * 60);
-  const padded = s < 10 ? `0${s}` : String(s);
-  return `${m}:${padded}`;
+  // Delegate to the shared formatter so a value like 59.7 never renders as "0:60" here either.
+  // The old local implementation rounded seconds without carrying into minutes.
+  return formatClock(seconds);
 }
 
 function approximateTextWidth(text, fontPx) {

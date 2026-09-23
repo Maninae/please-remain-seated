@@ -7,8 +7,13 @@
  */
 
 export function formatClock(seconds) {
+  // Round to the nearest whole second and carry into minutes, so a value like 59.7 never
+  // renders as "0:60" (that display was a bug: any seconds field must be 0..59). The old
+  // implementation floored `seconds`, which was safe for its own callers but silently drifted
+  // by up to a second, and any caller who instead rounded (like the time-split minor formatter)
+  // hit the 60-in-the-seconds-slot bug on their own. One shared formatter, one behaviour.
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-  const total = Math.floor(seconds);
+  const total = Math.round(seconds);
   const minutes = Math.floor(total / 60);
   const secs = total - minutes * 60;
   return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;

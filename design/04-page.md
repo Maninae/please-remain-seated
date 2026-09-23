@@ -9,16 +9,26 @@ One page, index.html. The hero is a race: two cabins, the same passengers and se
 3. The strategy names on each card (a select styled as text, so it reads as a label you can change).
 4. Controls, the time-split bars, the Monte Carlo strips, then the explainer.
 
-## Structure, top to bottom
+## Structure
 
-- Masthead: title "Please Remain Seated" in one weight and one color, a one-line deck that changes with mode: deplane "Why getting off a plane takes forever. Same people, same bags, two ways off." board "Same people, same bags, two ways on." Mode toggle (Deplane | Board) as a segmented control on the same line.
-- Race: two cabin cards stacked (desktop, nose left) or side by side vertical (phone, nose top). Card header: strategy select at the left, count at the center ("142 of 180 off" / "on"), clock at the right. Canvas fills the card. Under the first card only, one muted line labels the four states inline (moving, blocked, bag, seated); never a boxed legend.
-- Control bar: primary button (Race, then Restart), speed segmented (1x, 4x, 15x, 60x), a "new plane" button that rerolls the seed (seed shown as small text and editable), and the cabin knobs: aircraft preset select (all nine presets, label plus layout, e.g. "A320 · 3-3 · 180 seats"), load factor slider, compliance slider, families slider, bin era (Space bins / legacy). A "more knobs" disclosure holds politeness, distracted fraction, bag mix (0 / 1 / 2 probabilities as three sliders that renormalize), prep median.
+Two-column grid on desktop, single column on phone via a slide-in drawer. The main column holds the race and everything it makes; the sidebar holds every setting.
+
+- Phone top bar (< 900 px only, sticky): title "Please Remain Seated", a "Settings" button on the right that opens the drawer. The button carries a sliders icon and stays a 44 px tap target.
+- Masthead (main column, desktop only): title "Please Remain Seated" in one weight and one colour, a one-line deck that changes with mode, and the Deplane / Board segmented toggle on the same line.
+- Race (main column): two cabin cards stacked (desktop, nose left) or side by side vertical (phone, nose top). Card header: strategy select at the left with a small "i" info button inline, count at the centre ("142 of 180 off" / "on"), clock at the right. Canvas fills the card. Under the first card only, one muted line labels the four states inline (moving, blocked, bag, seated); never a boxed legend.
+- Race controls (main column, compact): Restart, speed segmented (1x, 4x, 15x, 60x), and the worst-seats-view toggle after finish. These are the controls used constantly, so they stay in the main column even at desktop widths where the sidebar owns the knobs. Chime toggle, "New plane", and the seed input live only in the sidebar to keep this bar tight.
+- Sidebar / settings drawer (right, sticky): a "Settings" heading, then Restart, the speed pips (mirrored), New plane and seed input, the aircraft picker, overhead bins ("Roomy (new)" / "Old-style"), the three main sliders (How full, Follow the rules, Groups), and a "More knobs" disclosure holding Let people out, Phone-checkers, Time to get up, and Carry-ons (three sub-sliders: No bag, One bag, Two bags), plus the chime-on-finish toggle. Every knob carries a small round "i" info button that opens a plain-language popover.
 - Where the time goes: two stacked bars (one per cabin) for the last passenger off, labelled inline; a toggle switches to the average passenger. Updates live during the race.
-- Run it 200 times: a button that runs every strategy for the current settings in a module Web Worker (js/worker.js over js/batch.js) with a progress bar, then draws the strips via renderStrips, sorted by median, the two racing strategies highlighted. The strip title states the finding in words, computed: e.g. "Aisle-first saves 3:10 over free-for-all at 85% compliance" or "Nothing beats free-for-all once families and non-compliance are in". Default 100 seeds; 200 and 500 selectable.
-- Deplane this plane: in Board mode, after a race finishes, a button carries that cabin's bin layout and population into a Deplane race (sim-factory takes `passengers` and `bins`).
-- Explainer (collapsed by default, "How this works"): six bullets on the model with the measured sources, the compliance and families caveat, and links to design/01-spec.md and design/02-research.md on GitHub. Plain language; no equations.
+- Run it 100 times: a button that runs every strategy for the current settings in a module Web Worker with a progress bar, then draws the strips sorted by median. The strip title states the finding in words. Runs count selectable: 100 (default), 200, 500.
+- Deplane this plane: in Board mode, after a race finishes, a button carries that cabin's bin layout and population into a Deplane race.
+- Explainer (collapsed by default, "How this works"): six bullets on the model with the measured sources.
 - Footer: "Owen Wang" and the GitHub link, small.
+
+### Breakpoints
+
+- **>= 1100 px (sidebar)**: two-column grid. Left column flexible, holds race, race controls, time-split, compare, explainer. Right column ~300 px, sticky under the masthead, holds Settings.
+- **900-1099 px (stacked)**: single column. Settings sit under the main column, same content, no drawer. No sticky.
+- **< 900 px (drawer)**: sticky phone top bar with title and Settings button opens a slide-in drawer from the right (min(360, 92vw), full height, focus-trapped, Escape or scrim tap to close). The compact race controls (Restart, speed, worst-seats toggle) stay under the cabins on the main flow.
 
 ## Interactions that make it fun
 
@@ -42,8 +52,47 @@ One page, index.html. The hero is a race: two cabins, the same passengers and se
 
 ## Copy
 
-Short, plain, wry. Labels are nouns. No exclamation marks. The strategy blurbs from the engine appear as a one-line note under the strategy select when it changes.
+Short, plain, wry, aimed at a smart high-school reader. Labels are nouns. No exclamation marks. Any technical term appears inside an info popover, not in the main label.
+
+### Label rename map (round-04)
+
+| Old label | New label |
+| --- | --- |
+| Load factor | How full |
+| Compliance | Follow the rules |
+| Families | Groups |
+| Bins (Space bins / Legacy) | Overhead bins (Roomy (new) / Old-style) |
+| Politeness | Let people out |
+| Distracted fraction | Phone-checkers |
+| Prep median (sec) | Time to get up (sec) |
+| P(no bag) / P(one bag) / P(two bags) | Carry-ons: No bag / One bag / Two bags |
+| Seeds (compare picker) | Runs |
+| Two doors (strategy) | Both doors |
+| Row-by-row (strategy) | One row at a time |
+| Aisle first (strategy) | Aisle seats first |
+| Alternating rows (strategy) | Every other row |
+| Bagless first (strategy) | No bags first |
+| Random (boarding) | Random order |
+| Back to front (5 zones) | Back to front, in zones |
+| Front to back (5 zones) | Front to back |
+| WILMA (window / middle / aisle) | Window, middle, aisle |
+| Steffen optimal | Steffen method |
+| Steffen modified | Steffen, in blocks |
+| Rotating zone | Rotating zones |
+| Open seating (Southwest) | Pick any seat |
+
+### Info popovers
+
+Each popover carries: a title, 2 to 4 plain sentences (under ~70 words), and where useful a "Learn more" link opening in a new tab. Content lives in `js/ui/glossary.js` keyed by id. Every strategy id, every aircraft preset id, and every setting has an entry:
+
+- Settings keys: `how-full`, `follow-the-rules`, `groups`, `overhead-bins`, `let-people-out`, `phone-checkers`, `time-to-get-up`, `carry-ons`, `runs`, `seed`, `speed`, `heat-view`, `time-split`, `compare`, `door-countdown`.
+- Strategy keys: every id in `js/engine/strategies/deplane.js` and `js/engine/strategies/board.js`.
+- Aircraft keys: every id in `js/engine/cabin-presets.js`.
+
+Popover behaviour: click opens, click outside or Escape closes, one open at a time, focus lands on the close button, focus returns to the trigger on close. Keyboard accessible; the popover carries `role="dialog"` with `aria-labelledby` on the title.
+
+Attachment points: each strategy select (info button next to the dropdown, updates on change), the aircraft select, overhead bins, every slider, the "Where the time goes" heading, the compare heading, the runs picker, the seed field, the door-countdown line, the Speed group, and the worst-seats-view toggle.
 
 ## Files
 
-index.html; css/base.css (tokens matching theme.js, type scale, layout), css/race.css (cards, clocks, control bar), css/charts.css; js/main.js (bootstrap only); js/ui/race.js (two sims, lockstep stepping, finish detection, follow-a-passenger); js/ui/controls.js (all inputs, URL and localStorage round-trip); js/ui/compare.js (worker batch + strips + finding sentence); js/ui/explainer.js (copy); js/ui/sound.js (chime, off by default); js/worker.js. Each under ~300 lines. Google Fonts link for Barlow with a real fallback stack.
+index.html; css/base.css (tokens matching theme.js, type scale, layout), css/race.css (cards, clocks, control bar), css/charts.css, css/sidebar.css (sidebar, phone drawer, info popover); js/main.js (bootstrap only); js/ui/race.js (two sims, lockstep stepping, finish detection, follow-a-passenger); js/ui/controls.js (all inputs, URL and localStorage round-trip, both speed groups); js/ui/compare.js (worker batch + strips + finding sentence); js/ui/explainer.js (copy); js/ui/sound.js (chime, off by default); js/ui/info-popover.js (round "i" button + anchored popover, one open at a time); js/ui/glossary.js (plain-language content keyed by id); js/ui/settings-drawer.js (phone drawer + focus trap + scroll lock); js/worker.js. Each under ~300 lines. Google Fonts link for Barlow with a real fallback stack.

@@ -19,6 +19,8 @@ import { mountCompare } from './ui/compare.js';
 import { mountExplainer } from './ui/explainer.js';
 import { mountFinishCard } from './ui/finish-card.js';
 import { createSound } from './ui/sound.js';
+import { mountInfoButtons, createInfoButton } from './ui/info-popover.js';
+import { mountSettingsDrawer } from './ui/settings-drawer.js';
 import {
   DEPLANE_STRATEGIES, BOARD_STRATEGIES, DEFAULT_DEPLANE_STRATEGY_ID, DEFAULT_BOARD_STRATEGY_ID,
 } from './engine/strategies/index.js';
@@ -147,8 +149,52 @@ function boot() {
   mountCompare({ store, race });
   mountExplainer({ store });
   mountFinishCard({ store });
+  mountInfoButtons(document);
+  mountStrategyInfoButtons(store);
+  wirePresetInfoAnchor(store);
+  mountSettingsDrawer();
 
   race.start();
+}
+
+function mountStrategyInfoButtons(store) {
+  // A per-cabin info button that always describes the currently-selected strategy. The button
+  // lives just after the strategy select and updates its glossary key on `change`.
+  for (const lane of ['a', 'b']) {
+    const select = document.getElementById(`strategy-${lane}`);
+    const picker = document.querySelector(`[data-strategy-picker="${lane}"]`);
+    if (!select || !picker) continue;
+    let currentKey = select.value || 'free-for-all';
+    const button = createInfoButton(currentKey);
+    button.dataset.strategyLane = lane;
+    // Insert the info button right after the select so it sits on the strategy-name line.
+    select.insertAdjacentElement('afterend', button);
+    const syncKey = () => {
+      const nextKey = select.value || currentKey;
+      currentKey = nextKey;
+      button.dataset.infoKey = nextKey;
+    };
+    select.addEventListener('change', syncKey);
+    // The race module rebuilds the strategy selects on mode change; observe the select so the
+    // info button follows without a manual rewire.
+    const observer = new MutationObserver(syncKey);
+    observer.observe(select, { childList: true });
+    store.subscribe(() => syncKey());
+  }
+}
+
+function wirePresetInfoAnchor(store) {
+  // The Aircraft info anchor tracks whichever preset id is currently selected. The anchor
+  // markup carries `data-info-preset-anchor="1"` in index.html so we can find it here.
+  const anchor = document.querySelector('[data-info-preset-anchor]');
+  if (!anchor) return;
+  const rebuild = () => {
+    anchor.innerHTML = '';
+    const key = store.state().presetId || 'a320';
+    anchor.appendChild(createInfoButton(key));
+  };
+  rebuild();
+  store.subscribe(rebuild);
 }
 
 function writeUrl(state) {

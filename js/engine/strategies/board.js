@@ -56,8 +56,8 @@ function bandZoneOf(row, rows, zoneCount) {
 
 const randomStrategy = {
   id: 'random',
-  label: 'Random',
-  blurb: 'Passengers board in whatever order they show up at the gate.',
+  label: 'Random order',
+  blurb: 'Passengers board in whatever order they arrive at the gate.',
   order(passengers, rng) {
     return shuffle(passengers, rng);
   },
@@ -65,8 +65,8 @@ const randomStrategy = {
 
 const backToFrontStrategy = {
   id: 'back-to-front',
-  label: 'Back to front (5 zones)',
-  blurb: 'Split the cabin into five row bands and board them back to front, random inside each band.',
+  label: 'Back to front, in zones',
+  blurb: 'The cabin is split into five bands; the back band boards first, then the next, and so on.',
   order(passengers, rng, cabin) {
     const rows = cabin?.rows ?? maxRow(passengers);
     const zones = [[], [], [], [], []];
@@ -81,8 +81,8 @@ const backToFrontStrategy = {
 
 const frontToBackStrategy = {
   id: 'front-to-back',
-  label: 'Front to back (5 zones)',
-  blurb: 'The same five bands, but boarded front first (the classic bad idea).',
+  label: 'Front to back',
+  blurb: 'The same five bands, front first. Every later passenger has to squeeze past a seated one.',
   order(passengers, rng, cabin) {
     const rows = cabin?.rows ?? maxRow(passengers);
     const zones = [[], [], [], [], []];
@@ -97,8 +97,8 @@ const frontToBackStrategy = {
 
 const wilmaStrategy = {
   id: 'wilma',
-  label: 'WILMA (window / middle / aisle)',
-  blurb: 'All window seats first, then all middles, then all aisles; random inside each wave.',
+  label: 'Window, middle, aisle',
+  blurb: 'All windows board first, then all middles, then all aisles. Nobody climbs over anyone.',
   order(passengers, rng) {
     const maxByBlockSide = computeMaxDepthByBlockSide(passengers);
     const byType = { window: [], middle: [], aisle: [] };
@@ -113,8 +113,8 @@ const wilmaStrategy = {
 
 const steffenStrategy = {
   id: 'steffen',
-  label: 'Steffen optimal',
-  blurb: 'Windows first, alternating rows so consecutive boarders are two rows apart, both sides of each row together, then middles, then aisles (Steffen 2008). The paper argues this is the theoretical minimum-time boarding under full compliance and no groups; in this sim reverse pyramid finishes ~1 min ahead of Steffen even at those settings, because our row-pair aisle already lets adjacent rows stow in parallel and denser packing wins over perfect spacing.',
+  label: 'Steffen method',
+  blurb: 'Windows first, spaced two rows apart so neighbours never wait for the same bin.',
   order(passengers, rng, cabin) {
     const maxByBlockSide = computeMaxDepthByBlockSide(passengers);
     const aisleCount = cabin?.aisleCount ?? countAisles(passengers);
@@ -162,8 +162,8 @@ const steffenStrategy = {
 
 const steffenModifiedStrategy = {
   id: 'steffen-modified',
-  label: 'Steffen modified',
-  blurb: 'A relaxed Steffen: four waves spaced four rows apart, and inside each wave board outside-in.',
+  label: 'Steffen, in blocks',
+  blurb: 'A looser version of the Steffen method: four waves, every fourth row, outside-in.',
   order(passengers, rng) {
     const maxByBlockSide = computeMaxDepthByBlockSide(passengers);
     const result = [];
@@ -185,7 +185,7 @@ const steffenModifiedStrategy = {
 const reversePyramidStrategy = {
   id: 'reverse-pyramid',
   label: 'Reverse pyramid',
-  blurb: 'Back-window corner first, moving diagonally forward and inward toward the front-aisle corner.',
+  blurb: 'Back-window corner first, moving diagonally forward and inward to the front-aisle corner.',
   order(passengers, rng, cabin) {
     const maxByBlockSide = computeMaxDepthByBlockSide(passengers);
     const rows = cabin?.rows ?? maxRow(passengers);
@@ -211,8 +211,8 @@ const reversePyramidStrategy = {
 
 const rotatingZoneStrategy = {
   id: 'rotating-zone',
-  label: 'Rotating zone',
-  blurb: 'Four bands: back quarter, then front quarter, then the second-from-back and second-from-front bands, alternating toward the middle. Order inside each band is random.',
+  label: 'Rotating zones',
+  blurb: 'Back quarter, then front quarter, then the next-in bands, alternating toward the middle.',
   order(passengers, rng, cabin) {
     // Alternating back/front bands per the Van den Briel / Nyquist framing of rotating zone.
     // The published definition fixes the outer-to-inner band order but does not pin down the
@@ -242,8 +242,8 @@ const rotatingZoneStrategy = {
 
 const openSeatingStrategy = {
   id: 'open-seating',
-  label: 'Open seating (Southwest)',
-  blurb: 'No assigned seats. Passengers spread through the cabin and pick a seat that requires nobody to stand: an empty row (window first) if they can find one, else the aisle seat of a partially full row.',
+  label: 'Pick any seat',
+  blurb: 'No assigned seats. Each passenger picks a seat that does not make anyone else stand up.',
   order(passengers, rng, cabin) {
     if (!cabin) throw new Error('open-seating needs the cabin to know which seats exist');
     return assignOpenSeating(passengers, rng, cabin);
