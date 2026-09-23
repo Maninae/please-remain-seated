@@ -84,12 +84,15 @@ export function createCabinView(canvas, options = {}) {
     ctx.restore();
   }
 
-  function hitTest(x, y) {
+  function hitTest(x, y, options = {}) {
     if (!geometry) return null;
-    // Called with canvas CSS-pixel coordinates.
+    // Called with canvas CSS-pixel coordinates. The caller may pass a generous `maxDistancePx`
+    // so a tap or click anywhere near a dot always picks up the nearest passenger; a fixed
+    // radius equal to a few dot radii would still miss on a 777 where the dots are small.
     const passengers = lastPassengers;
     if (!passengers) return null;
-    return nearestPassenger(geometry, passengers, x, y);
+    const maxDistancePx = Number.isFinite(options.maxDistancePx) ? options.maxDistancePx : null;
+    return nearestPassenger(geometry, passengers, x, y, maxDistancePx);
   }
 
   // Cache passengers between draw calls so hit-test does not need the caller to pass them again.

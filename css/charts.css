@@ -115,3 +115,30 @@
 }
 .explainer .body li { margin: 4px 0; }
 .explainer .body a { color: var(--ink); }
+
+.compare-timing {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* When the time-split renders a below-segment label because a segment was too narrow to fit
+   inline, we put those "hint" lines under the bar so the value never disappears silently. */
+.time-split .below-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-top: 4px;
+}
+.time-split .below-labels .swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 4px;
+}

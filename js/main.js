@@ -1,9 +1,15 @@
 /**
  * Page bootstrap. Nothing lives here except the wiring: read the URL, build the store, mount the
- * pieces (race, controls, compare, explainer, sound), let them talk through the shared store.
+ * pieces (race, controls, compare, explainer, sound, finish-card), let them talk through the
+ * shared store.
  *
  * The store is a tiny observable: `state()` returns the current snapshot, `update(patch, options)`
  * merges and notifies. Every module subscribes to what it cares about.
+ *
+ * URL round-trip covers every knob that materially changes the sim so a link is always
+ * reproducible: mode, both strategies, seed, preset, load, compliance, families, bins,
+ * politeness, distracted, prep median, and the three bag probabilities. The share flow relies on
+ * this (M10 in the critic pass).
  */
 
 import { createStore } from './ui/store.js';
@@ -11,6 +17,7 @@ import { mountRace } from './ui/race.js';
 import { mountControls } from './ui/controls.js';
 import { mountCompare } from './ui/compare.js';
 import { mountExplainer } from './ui/explainer.js';
+import { mountFinishCard } from './ui/finish-card.js';
 import { createSound } from './ui/sound.js';
 import {
   DEPLANE_STRATEGIES, BOARD_STRATEGIES, DEFAULT_DEPLANE_STRATEGY_ID, DEFAULT_BOARD_STRATEGY_ID,
@@ -40,6 +47,18 @@ const DEFAULTS = Object.freeze({
   seed: 'plane-001',
 });
 
+const URL_NUMERIC_KEYS = Object.freeze([
+  ['load', 'loadFactor', 0.4, 1],
+  ['compliance', 'compliance', 0, 1],
+  ['families', 'families', 0, 0.6],
+  ['politeness', 'politeness', 0, 1],
+  ['distracted', 'distracted', 0, 0.4],
+  ['prep', 'prepMedian', 0.5, 6],
+  ['bag0', 'bagP0', 0, 1],
+  ['bag1', 'bagP1', 0, 1],
+  ['bag2', 'bagP2', 0, 1],
+]);
+
 function readFromUrl(defaults) {
   if (typeof window === 'undefined') return { ...defaults };
   const params = new URLSearchParams(window.location.search);
@@ -59,10 +78,12 @@ function readFromUrl(defaults) {
   const seed = readStr('seed'); if (seed) state.seed = seed;
   const preset = readStr('preset'); if (preset && CABIN_PRESET_BY_ID[preset]) state.presetId = preset;
   const bins = readStr('bins'); if (bins === 'space' || bins === 'legacy') state.bins = bins;
-  const load = readNum('load', 0.4, 1);         if (load !== null) state.loadFactor = load;
-  const compliance = readNum('compliance', 0, 1); if (compliance !== null) state.compliance = compliance;
-  const families = readNum('families', 0, 0.6);  if (families !== null) state.families = families;
-  const speed = readNum('speed', 1, 60);          if (speed !== null) state.speed = speed;
+  for (const [param, key, min, max] of URL_NUMERIC_KEYS) {
+    const value = readNum(param, min, max);
+    if (value !== null) state[key] = value;
+  }
+  const speed = readNum('speed', 1, 60);
+  if (speed !== null) state.speed = speed;
   return state;
 }
 
@@ -102,7 +123,6 @@ function boot() {
   const store = createStore(initialState());
   const sound = createSound();
 
-  // Persist and mirror to the URL on every change.
   store.subscribe((state) => {
     persistToLocalStorage(state);
     writeUrl(state);
@@ -110,7 +130,7 @@ function boot() {
 
   const race = mountRace({
     store,
-    onFinish: (winner) => {
+    onFinish: () => {
       if (store.state().sound) sound.playChime();
     },
   });
@@ -118,8 +138,8 @@ function boot() {
   mountControls({ store, sound, race });
   mountCompare({ store, race });
   mountExplainer({ store });
+  mountFinishCard({ store });
 
-  // Kick off the first race so the page is alive within a second.
   race.start();
 }
 
@@ -131,11 +151,24 @@ function writeUrl(state) {
   params.set('b', state.mode === 'deplane' ? state.strategyB : state.boardStrategyB);
   params.set('seed', state.seed);
   params.set('preset', state.presetId);
-  params.set('load', state.loadFactor.toFixed(2));
-  params.set('compliance', state.compliance.toFixed(2));
-  params.set('families', state.families.toFixed(2));
+  params.set('bins', state.bins);
+  params.set('load', formatNumericForUrl(state.loadFactor));
+  params.set('compliance', formatNumericForUrl(state.compliance));
+  params.set('families', formatNumericForUrl(state.families));
+  params.set('politeness', formatNumericForUrl(state.politeness));
+  params.set('distracted', formatNumericForUrl(state.distracted));
+  params.set('prep', formatNumericForUrl(state.prepMedian));
+  params.set('bag0', formatNumericForUrl(state.bagP0));
+  params.set('bag1', formatNumericForUrl(state.bagP1));
+  params.set('bag2', formatNumericForUrl(state.bagP2));
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
   try { window.history.replaceState({}, '', next); } catch (error) { /* ignore */ }
+}
+
+function formatNumericForUrl(value) {
+  if (!Number.isFinite(value)) return '';
+  // Two decimals, no trailing zero for whole numbers like 1 (M10 nit n6 in the critic pass).
+  return Number(value.toFixed(2)).toString();
 }
 
 if (typeof window !== 'undefined') {

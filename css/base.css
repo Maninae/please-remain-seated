@@ -37,6 +37,9 @@
   --page-max: 1080px;
 
   --tap: 44px;
+
+  /* Every native form control follows this accent. Browser blue is banned on this page. */
+  accent-color: var(--ink);
 }
 
 * { box-sizing: border-box; }
@@ -184,9 +187,108 @@ select {
 }
 select:focus-visible { outline: 2px solid var(--moving); outline-offset: 2px; }
 
+/* -------- Range inputs (paper palette, no browser blue anywhere) ---------- */
+
 input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   min-height: var(--tap);
+  background: transparent;
+  cursor: pointer;
+  accent-color: var(--ink);
+}
+
+/* WebKit / Blink track */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--paper-2);
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  box-shadow: 0 1px 2px rgba(31, 42, 51, 0.18);
+  margin-top: -8px;
+  cursor: grab;
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--moving);
+  outline-offset: 2px;
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  background: var(--ink);
+  cursor: grabbing;
+}
+
+/* Firefox */
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--paper-2);
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  box-shadow: 0 1px 2px rgba(31, 42, 51, 0.18);
+  cursor: grab;
+}
+input[type="range"]:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--moving);
+  outline-offset: 2px;
+}
+
+/* -------- Checkbox (paper) ---------- */
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.checkbox-label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  margin: 0;
+  transition: background-color 0.12s ease-out, border-color 0.12s ease-out;
+}
+.checkbox-label input[type="checkbox"]:hover { border-color: var(--ink); }
+.checkbox-label input[type="checkbox"]:checked {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.checkbox-label input[type="checkbox"]:checked::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid var(--paper);
+  border-bottom: 2px solid var(--paper);
+  transform: rotate(-45deg) translate(1px, -1px);
+}
+.checkbox-label input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--moving);
+  outline-offset: 2px;
 }
 
 input[type="text"], input[type="number"] {
@@ -214,6 +316,66 @@ label { color: var(--ink-soft); font-size: 13px; }
   color: var(--ink-muted);
   font-weight: 600;
   margin: 0 0 var(--gap-s);
+}
+
+/* Finish card (winner + margin + settings + copy-link, drawn between the race and controls) */
+
+.finish-card {
+  margin-top: var(--gap-m);
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 18px;
+  align-items: center;
+}
+.finish-card .headline {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.35;
+  grid-column: 1 / -1;
+}
+.finish-card .headline .winner-name { color: var(--moving); }
+.finish-card .why {
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+  grid-column: 1;
+}
+.finish-card .facts {
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+  grid-column: 1;
+}
+.finish-card .actions {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 160px;
+}
+.finish-card .actions button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.finish-card .pb {
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-align: right;
+}
+.finish-card .pb.new { color: var(--moving); font-weight: 600; }
+
+@media (max-width: 620px) {
+  .finish-card { grid-template-columns: 1fr; }
+  .finish-card .actions { grid-column: 1; grid-row: auto; min-width: 0; }
+  .finish-card .pb { text-align: left; }
 }
 
 /* Footer */

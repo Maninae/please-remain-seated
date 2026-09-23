@@ -182,6 +182,22 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMax) {
 // Time split
 // -----------------------------------------------------------------------------
 
+/**
+ * Render one time-split bar.
+ *
+ * Options:
+ *   width           SVG width in px (defaults to 720 or the svg width attribute).
+ *   title           Optional title above the bar.
+ *   scaleTotal      Pin the bar length to this many seconds instead of the split's own total.
+ *                   The caller passes the larger of the two lanes' totals so the two bars share
+ *                   one scale (a lane that finished 67s sooner is visibly shorter). If omitted,
+ *                   the bar fills the whole width using the split's own sum.
+ *
+ * Return shape:
+ *   { belowLabels: [{ key, label, color }] }
+ *   A list of segments whose inline label did not fit; the caller renders them as a small
+ *   `key color · label` line under the bar so the value never disappears silently.
+ */
 export function renderTimeSplit(host, split, options = {}) {
   const svg = ensureSvg(host);
   clearElement(svg);
@@ -200,29 +216,42 @@ export function renderTimeSplit(host, split, options = {}) {
     }, options.title);
   }
 
-  const total = BUCKET_ORDER.reduce((sum, k) => sum + Math.max(0, (split && split[k]) || 0), 0);
+  const ownTotal = BUCKET_ORDER.reduce((sum, k) => sum + Math.max(0, (split && split[k]) || 0), 0);
+  const scaleTotal = Number.isFinite(options.scaleTotal) && options.scaleTotal > 0
+    ? options.scaleTotal
+    : ownTotal;
   const barY = options.title ? 22 : 0;
   const barH = TIMESPLIT_HEIGHT_PX;
-  if (total <= 0) {
+  const belowLabels = [];
+
+  if (ownTotal <= 0 || scaleTotal <= 0) {
+    // Draw an empty ghost track spanning the full scale so an empty lane is still visible.
     appendRect(svg, {
       x: 0, y: barY, width, height: barH,
       fill: THEME.seatFill, stroke: THEME.rule, 'stroke-width': 0.6,
     });
-    return svg;
+    return { belowLabels };
   }
+
+  // Draw a faint outline of the full scale so a shorter bar reads as shorter, not clipped.
+  appendRect(svg, {
+    x: 0, y: barY, width, height: barH,
+    fill: 'none', stroke: THEME.rule, 'stroke-width': 0.5, 'stroke-dasharray': '2 3',
+  });
 
   let x = 0;
   for (const key of BUCKET_ORDER) {
     const v = Math.max(0, (split && split[key]) || 0);
     if (v <= 0) continue;
-    const w = (v / total) * width;
+    const w = (v / scaleTotal) * width;
     appendRect(svg, {
       x, y: barY, width: w, height: barH,
       fill: BUCKET_COLORS[key],
     });
-    // Inline label.
+    // Inline label. If it does not fit, remember it so the caller can render a below-bar chip.
     const label = `${BUCKET_LABELS[key]}  ${formatMinutesSeconds(v)}`;
-    if (w >= approximateTextWidth(label, TIMESPLIT_LABEL_FONT_PX) + TIMESPLIT_INSET_PX * 2) {
+    const fits = w >= approximateTextWidth(label, TIMESPLIT_LABEL_FONT_PX) + TIMESPLIT_INSET_PX * 2;
+    if (fits) {
       appendText(svg, {
         x: x + TIMESPLIT_INSET_PX,
         y: barY + barH / 2 + TIMESPLIT_LABEL_FONT_PX / 3,
@@ -230,14 +259,18 @@ export function renderTimeSplit(host, split, options = {}) {
         fill: labelInkOn(BUCKET_COLORS[key]),
         'font-weight': 500,
       }, label);
+    } else {
+      belowLabels.push({ key, label, color: BUCKET_COLORS[key] });
     }
     x += w;
   }
+  // Ink boundary around the filled portion of the bar.
+  const filledWidth = (ownTotal / scaleTotal) * width;
   appendRect(svg, {
-    x: 0, y: barY, width, height: barH,
+    x: 0, y: barY, width: filledWidth, height: barH,
     fill: 'none', stroke: THEME.ink, 'stroke-width': 0.8, 'stroke-opacity': 0.4,
   });
-  return svg;
+  return { belowLabels };
 }
 
 // -----------------------------------------------------------------------------

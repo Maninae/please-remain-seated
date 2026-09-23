@@ -17,10 +17,10 @@
   background: var(--paper);
   border: 1px solid var(--rule);
   border-radius: var(--radius-l);
-  padding: 14px 16px 12px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: var(--gap-s);
+  gap: 8px;
 }
 
 .race .cabin-card.winner .clock { color: var(--moving); font-weight: 700; }
@@ -93,6 +93,11 @@
   letter-spacing: 0.01em;
 }
 
+.card-header .clock.pre-door {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
 .card-header .margin {
   font-size: 12px;
   color: var(--moving);
@@ -100,8 +105,19 @@
   min-height: 1em;
   margin-top: 2px;
 }
+.card-header .margin.behind { color: var(--ink-soft); }
 
-/* Canvas fills the card, sized by the layout container */
+.card-header .door-status {
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-style: italic;
+  min-height: 1em;
+  margin-top: 1px;
+}
+
+/* Canvas fills the card. Height is set inline from js/ui/race.js based on the layout: seat
+   columns plus aisles determine the vertical (long-axis) space we need so a 777 draws bigger than
+   a CRJ instead of both being clamped to a fixed 180 px. */
 
 .canvas-wrap {
   position: relative;
@@ -135,31 +151,27 @@
 .canvas-wrap .tooltip.on { opacity: 1; }
 @media (hover: none) { .canvas-wrap .tooltip { display: none; } }
 
-/* Canvas heights by cabin size are set inline from js/ui/race.js after layout is known;
-   the defaults below cover a plain A320 horizontal render on desktop. */
-
-.cabin-card.horizontal .canvas-wrap { height: 200px; }
-.cabin-card.horizontal.big .canvas-wrap { height: 260px; }
-
 .race-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px 20px;
-  padding: 4px 4px 0;
+  gap: 8px 14px;
+  padding: 2px 4px 0;
   color: var(--ink-muted);
   font-size: 12px;
+  margin: 0;
 }
 .race-legend .swatch {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 .race-legend .swatch::before {
   content: "";
-  width: 10px; height: 10px;
+  width: 9px; height: 9px;
   border-radius: 999px;
   background: currentColor;
   display: inline-block;
+  flex: 0 0 auto;
 }
 .race-legend .swatch.moving  { color: var(--moving); }
 .race-legend .swatch.blocked { color: var(--moving); }
@@ -168,20 +180,23 @@
 .race-legend .swatch.seated  { color: #a9a193; }
 
 .follow-line {
-  padding: 4px 4px 0;
+  padding: 2px 4px 0;
   color: var(--ink-soft);
   font-size: 12px;
   min-height: 1.2em;
+  margin: 0;
 }
+.follow-line.stable { color: var(--ink); font-weight: 500; }
 
-/* Phone: two cabins side by side, vertical, each half width */
+/* Phone: two cabins side by side, vertical, each half width. Keep the legend compact but visible;
+   B3 in the critic pass was `display: none` here, which stranded a phone visitor with no key. */
 @media (max-width: 899px) {
-  .race { flex-direction: row; gap: 10px; }
-  .race .cabin-card { flex: 1 1 0; min-width: 0; padding: 12px 10px 10px; }
+  .race { flex-direction: row; gap: 8px; }
+  .race .cabin-card { flex: 1 1 0; min-width: 0; padding: 10px 8px 8px; gap: 6px; }
   .card-header {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
-    gap: 6px;
+    gap: 4px;
     text-align: left;
   }
   .card-header .strategy-picker { justify-self: stretch; }
@@ -189,9 +204,15 @@
   .card-header .strategy-picker .blurb { display: none; }
   .card-header .count { justify-self: start; }
   .card-header .clock-block { justify-self: start; align-items: flex-start; }
-  .card-header .clock { font-size: 40px; }
-  .cabin-card.vertical .canvas-wrap { height: 520px; }
-  .race-legend { display: none; }
+  .card-header .clock { font-size: 36px; }
+
+  /* Compact legend at phone width: one line, wrap allowed, shown under lane A only. */
+  .race-legend {
+    font-size: 11px;
+    gap: 4px 10px;
+    padding: 2px 2px 0;
+  }
+  .cabin-card[data-lane="b"] .race-legend { display: none; }
 }
 
 /* Control bar */
@@ -302,8 +323,37 @@
   display: block;
   font-size: 13px;
 }
+.time-split .bar-label .total {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
 .time-split svg { width: 100%; height: auto; display: block; }
 
 @media (max-width: 620px) {
   .time-split .bar-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+.time-split .bar-wrap { min-width: 0; }
+.time-split .below-labels {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.time-split .below-labels .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.time-split .below-labels .swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
 }
