@@ -18,7 +18,7 @@
 import { CABIN_PRESETS, CABIN_PRESET_BY_ID } from '../../engine/cabin-presets.js';
 import {
   loadRankingsIndex, snapKnobsToGrid, selectCellForRequest,
-  sensitivityCellsFor, hasSensitivity, loadCellFile,
+  sensitivityCellsFor, hasSensitivity, loadCellFile, loadCellWithFallback,
 } from './rankings-data.js';
 import { renderRankingsChart, renderHistogramSparkline } from './rankings-chart.js';
 import { renderStatTiles } from './rankings-stats.js';
@@ -41,6 +41,7 @@ export function mountRankingsTab({ store }) {
     loading: false,
     cellCache: new Map(),          // filename -> promise-of-cellData
     currentCellData: null,
+    currentCellRef: null,          // cell ref that actually rendered (may be a fallback)
     lastRenderKey: '',
   };
 
@@ -102,25 +103,43 @@ export function mountRankingsTab({ store }) {
     const key = `${cellRef.cell.id}::${request.exact ? 'exact' : 'fallback'}`;
     if (key === state.lastRenderKey && state.currentCellData) {
       // Still re-render controls (labels, nearest-run text may have changed).
-      renderTop(panel, request, cellRef);
+      renderTop(panel, request, state.currentCellRef || cellRef);
       renderStats(panel, state.currentCellData, request.mode);
-      renderChart(panel, state.currentCellData, request, cellRef);
+      renderChart(panel, state.currentCellData, request, state.currentCellRef || cellRef);
       await renderSensitivity(panel, state.currentCellData, request);
       return;
     }
     state.lastRenderKey = key;
     setStatus(panel, 'Loading cell...');
-    try {
-      const cellData = await loadCellOrCache(cellRef.cell.file);
-      state.currentCellData = cellData;
-      setStatus(panel, '');
-      renderTop(panel, request, cellRef);
-      renderStats(panel, cellData, request.mode);
-      renderChart(panel, cellData, request, cellRef);
-      await renderSensitivity(panel, cellData, request);
-    } catch (error) {
-      setStatus(panel, `Cell load failed: ${error.message || error}`);
+    // loadCellWithFallback never rejects: it tries the primary file, the preview index's
+    // equivalent, and the headline cell for (mode, preset) in that order, then resolves null.
+    // A partial precompute run therefore never leaves the page with an uncaught rejection.
+    const loaded = await loadCellWithFallback({
+      indexObject: state.indexObject,
+      mode: request.mode,
+      preset: request.preset,
+      knobs: request.knobs,
+      primary: cellRef.cell,
+    });
+    if (!loaded) {
+      state.currentCellData = null;
+      state.currentCellRef = null;
+      renderNoCell(panel, request);
+      return;
     }
+    // When a fallback fires, the loaded cell metadata replaces the selected one so the "no run
+    // at X, showing Y" knob note reflects what actually landed. selectCellForRequest already
+    // toggles exactMatch, keep that untouched for anything downstream that reads it.
+    const effectiveRef = loaded.wasFallback
+      ? { cell: loaded.cellMeta, exactMatch: false }
+      : cellRef;
+    state.currentCellData = loaded.cellData;
+    state.currentCellRef = effectiveRef;
+    setStatus(panel, '');
+    renderTop(panel, request, effectiveRef);
+    renderStats(panel, loaded.cellData, request.mode);
+    renderChart(panel, loaded.cellData, request, effectiveRef);
+    await renderSensitivity(panel, loaded.cellData, request);
   }
 
   async function loadCellOrCache(filename) {

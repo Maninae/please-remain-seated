@@ -256,6 +256,79 @@ test('race pauses when the reader leaves the Race tab and resumes on return', as
   }
 });
 
+test('rankings tab: primary cell 404 falls back to a sibling cell with no console error', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  const consoleMessages = [];
+  const infoMessages = [];
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    page.on('console', (m) => {
+      if (m.type() === 'error') consoleMessages.push(m.text());
+      if (m.type() === 'info') infoMessages.push(m.text());
+    });
+    page.on('pageerror', (e) => consoleMessages.push(`pageerror: ${e.message}`));
+
+    // Fetch the index up front so the test knows which primary cell the page will request for
+    // the default request (deplane / a320 / defaults). Land on a same-origin page first so
+    // relative fetches resolve against localhost, then read the index in a plain HTTP get.
+    await page.goto(`${BASE_URL}/index.html`, { waitUntil: 'load' });
+    const rawIndex = await page.evaluate(async (baseUrl) => {
+      const r = await fetch(`${baseUrl}/data/rankings/index.json`, { cache: 'no-store' });
+      if (!r.ok) return null;
+      return r.json();
+    }, BASE_URL);
+    if (!rawIndex || !Array.isArray(rawIndex.cells) || rawIndex.cells.length === 0) {
+      t.diagnostic('no rankings index.json yet; skipping fallback test');
+      return;
+    }
+    const primary = rawIndex.cells.find(
+      (c) => c.mode === 'deplane' && c.preset === 'a320' && c.kind === 'headline',
+    );
+    if (!primary) {
+      t.diagnostic('no deplane/a320 headline cell in index; skipping');
+      return;
+    }
+    // Intercept exactly the primary file and respond 404. Every other cell load flows through
+    // untouched, so the fallback (preview file or headline) is what the page ends up showing.
+    await page.route(`**/data/rankings/${primary.file}`, (route) => {
+      route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.evaluate(() => localStorage.clear());
+    await page.goto(`${BASE_URL}/index.html?tab=rankings&seed=rank-fallback`, { waitUntil: 'load' });
+    await page.waitForSelector('.rankings-tab');
+    await page.waitForFunction(() => {
+      const hasChart = !!document.querySelector('.rankings-chart-svg-host svg circle');
+      const status = document.querySelector('[data-rankings-status]')?.textContent || '';
+      return hasChart || status.length > 0;
+    }, { timeout: 8000 });
+
+    const state = await page.evaluate(() => ({
+      hasChart: !!document.querySelector('.rankings-chart-svg-host svg'),
+      chartCircleCount: document.querySelectorAll('.rankings-chart-svg-host svg circle').length,
+      status: document.querySelector('[data-rankings-status]')?.textContent || '',
+      footnote: document.querySelector('[data-rankings-footnote]')?.textContent || '',
+    }));
+    // The fallback path must land: chart shows dots, status carries no "cell load failed" text.
+    assert.ok(state.hasChart, 'chart svg should render after the fallback resolves');
+    assert.ok(state.chartCircleCount >= 5,
+      `expected a fallback cell with several strategy dots, got ${state.chartCircleCount}`);
+    assert.ok(!/cell load failed/i.test(state.status),
+      `status must not be the failure message, got: "${state.status}"`);
+    // One console.info line should announce which fallback was used; no console.error escapes.
+    const nonBenign = consoleMessages.filter(isBenignConsoleMessage);
+    assert.deepEqual(nonBenign, [],
+      `no non-benign console errors, got: ${nonBenign.join('; ')}`);
+    const infoAboutFallback = infoMessages.filter((m) => /fallback|no cell available/i.test(m));
+    assert.ok(infoAboutFallback.length >= 1,
+      `expected a Rankings info line about the fallback, got: ${infoMessages.join(' | ')}`);
+  } finally {
+    await browser.close();
+  }
+});
+
 test('desktop + phone screenshots for every tab under fix-round-06/', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }

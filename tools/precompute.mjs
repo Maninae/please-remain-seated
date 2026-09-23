@@ -281,7 +281,38 @@ function indexPathFor(previewMode) {
   return join(OUTPUT_DIR, previewMode ? 'index-preview.json' : 'index.json');
 }
 
-function buildInitialIndex({ cells, engineVersion, generatedAt, previewMode }) {
+/**
+ * Cell entry shape used in the index for both the `cells` and `pending` lists. The Rankings
+ * page reads (file, mode, preset, knobs, kind, seeds), and treats `pending` as read-only.
+ */
+function cellIndexEntry(cell) {
+  return {
+    id: cell.id,
+    mode: cell.mode,
+    preset: cell.presetId,
+    knobs: cell.knobs,
+    seeds: cell.seeds,
+    kind: cell.kind,
+    file: cell.filename,
+  };
+}
+
+/**
+ * Split a planned cell list into { present, pending } by looking for each cell's file on disk.
+ * The index writer uses this so `cells` never lists a file that is not yet written; the not-yet
+ * cells go under `pending` so the plan stays visible while the run is still filling in.
+ */
+function partitionCellsByDisk(plannedCells, outputDir) {
+  const present = [];
+  const pending = [];
+  for (const cell of plannedCells) {
+    if (existsSync(join(outputDir, cell.filename))) present.push(cell);
+    else pending.push(cell);
+  }
+  return { present, pending };
+}
+
+function buildInitialIndex({ cells, pending = [], engineVersion, generatedAt, previewMode }) {
   return {
     generatedAt,
     engineVersion,
@@ -301,15 +332,8 @@ function buildInitialIndex({ cells, engineVersion, generatedAt, previewMode }) {
     namedHeadlinePresets: NAMED_HEADLINE_PRESET_IDS,
     sensitivityPresets: SENSITIVITY_PRESET_IDS,
     sensitivityFactors: SENSITIVITY_FACTORS.map((factor) => ({ knob: factor.knob, values: [...factor.values] })),
-    cells: cells.map((cell) => ({
-      id: cell.id,
-      mode: cell.mode,
-      preset: cell.presetId,
-      knobs: cell.knobs,
-      seeds: cell.seeds,
-      kind: cell.kind,
-      file: cell.filename,
-    })),
+    cells: cells.map(cellIndexEntry),
+    pending: pending.map(cellIndexEntry),
   };
 }
 
@@ -601,11 +625,21 @@ async function main() {
     const existingIndex = loadExistingIndex(previewMode);
     ensureIndexEngineMatches(existingIndex, engineVersion);
 
-    const generatedAt = new Date().toISOString();
-    // Always rebuild the index from the current plan so it stays a truthful map of what should
-    // be on disk. The engine-version check above already refused a mismatch.
-    const indexObject = buildInitialIndex({ cells, engineVersion, generatedAt, previewMode });
-    writeJsonAtomic(indexPathFor(previewMode), indexObject);
+    // Rebuild the index from what is actually on disk. `cells` lists only the files that exist
+    // right now; the remaining cells go under `pending` so the plan is still visible. The
+    // Rankings page uses `cells` as its ground truth so it never fetches a file that is not
+    // there. A killed run therefore always leaves a truthful index behind.
+    const refreshIndex = () => {
+      const { present, pending } = partitionCellsByDisk(cells, OUTPUT_DIR);
+      const indexObject = buildInitialIndex({
+        cells: present, pending,
+        engineVersion, generatedAt: new Date().toISOString(), previewMode,
+      });
+      writeJsonAtomic(indexPathFor(previewMode), indexObject);
+      return indexObject;
+    };
+
+    refreshIndex();
 
     let doneCells = 0;
     let skippedCells = 0;
@@ -621,8 +655,7 @@ async function main() {
       writeJsonAtomic(join(OUTPUT_DIR, cell.filename), cellFile);
       doneCells += 1;
       // Refresh index atomically after each cell so a killed run still leaves a valid one.
-      indexObject.generatedAt = new Date().toISOString();
-      writeJsonAtomic(indexPathFor(previewMode), indexObject);
+      refreshIndex();
       renderProgress({
         doneCells, totalCells: filtered.length, skippedCells,
         runStart, lastCell: cell, lastWallSeconds: wallSeconds,
@@ -664,6 +697,7 @@ export {
   seedPrefixFor,
   readEngineVersion,
   buildInitialIndex,
+  partitionCellsByDisk,
   indexPathFor,
   cellCanSkip,
   STRATEGY_COUNT_BY_MODE,

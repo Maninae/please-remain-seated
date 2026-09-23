@@ -14,6 +14,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   buildPlan, summarizePlan, buildHeadlineCells, buildSensitivityCells,
@@ -23,8 +26,8 @@ import {
 } from '../../tools/precompute-plan.mjs';
 import {
   makeStrategyAccumulator, absorbAggregate, finaliseStrategy, quantile,
-  seedPrefixFor, buildInitialIndex, STRATEGY_COUNT_BY_MODE, STRATEGIES_BY_MODE,
-  HISTOGRAM_BIN_SECONDS,
+  seedPrefixFor, buildInitialIndex, partitionCellsByDisk,
+  STRATEGY_COUNT_BY_MODE, STRATEGIES_BY_MODE, HISTOGRAM_BIN_SECONDS,
 } from '../../tools/precompute.mjs';
 import { CABIN_PRESETS, CABIN_PRESET_BY_ID } from '../../js/engine/cabin-presets.js';
 import { createSimFromSeed } from '../../js/engine/sim-factory.js';
@@ -310,4 +313,103 @@ test('quantile: sorted-input linear interpolation matches expected quantiles', (
   assert.equal(quantile(values, 0.5), 5.5);
   assert.equal(quantile(values, 0.1), 1.9);
   assert.equal(quantile(values, 0.9), 9.1);
+});
+
+// ---------------------------------------------------------------------------------------------
+// 4. Partial-run index truthfulness (cells lists only present files; pending lists the rest)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The precompute writer refreshes data/rankings/index.json after every cell finishes. Between
+ * that write and the last cell landing, `cells` must list only files that actually exist on
+ * disk, with the remaining planned cells under `pending`. Otherwise the Rankings page fetches
+ * files that are not there and shows 404s.
+ *
+ * Simulate a partial run: pick five cells from the plan, tiny-run one strategy end-to-end
+ * through the accumulator pipeline for two of them, write those two files to a temp dir, and
+ * leave the other three unwritten. Then partitionCellsByDisk + buildInitialIndex should place
+ * exactly the two written cells under `cells` and the three unwritten under `pending`.
+ */
+test('partial run: index.cells lists only files on disk; pending lists the rest', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'prs-precompute-partial-'));
+  try {
+    // Pick five cells from the plan: three deplane headlines and two board sensitivity cells.
+    const planCells = buildPlan();
+    const chosen = [
+      planCells.find((c) => c.mode === 'deplane' && c.presetId === 'a320' && c.kind === 'headline'),
+      planCells.find((c) => c.mode === 'deplane' && c.presetId === 'b738-two-class' && c.kind === 'headline'),
+      planCells.find((c) => c.mode === 'deplane' && c.presetId === 'crj700' && c.kind === 'headline'),
+      planCells.find((c) => c.mode === 'board' && c.presetId === 'a320' && c.kind === 'sensitivity'),
+      planCells.find((c) => c.mode === 'board' && c.presetId === 'b738-two-class' && c.kind === 'sensitivity'),
+    ].filter(Boolean);
+    assert.equal(chosen.length, 5, 'expected five cells present in the plan');
+
+    // Simulate a partial run: write two cell files via the existing tiny-run pipeline. Each
+    // one goes through runTinyCell + a hand-built cell object matching the shape precompute
+    // writes on disk. The other three intentionally stay unwritten so partitionCellsByDisk
+    // has both cases to sort.
+    const written = new Set();
+    for (const cell of chosen.slice(0, 2)) {
+      const strategies = STRATEGIES_BY_MODE[cell.mode].slice(0, 1).map((s) => s.id);
+      const { finalised } = runTinyCell({
+        mode: cell.mode, presetId: cell.presetId, strategyIds: strategies, seedCount: 2,
+      });
+      const cellFile = {
+        cell: {
+          mode: cell.mode, preset: cell.presetId, knobs: cell.knobs, seeds: cell.seeds,
+          engineVersion: 'test', generatedAt: '2026-09-22T00:00:00Z',
+        },
+        passengerCount: finalised[0].n * 100, // shape only, not asserted downstream
+        strategies: finalised,
+      };
+      writeFileSync(join(tempDir, cell.filename), JSON.stringify(cellFile));
+      written.add(cell.filename);
+    }
+
+    // Every written filename lands on disk; the unwritten ones do not.
+    for (const name of written) assert.ok(existsSync(join(tempDir, name)), `expected ${name} on disk`);
+
+    const { present, pending } = partitionCellsByDisk(chosen, tempDir);
+    // Present matches the two we wrote (order preserved from the input); pending covers the
+    // other three untouched cells.
+    assert.equal(present.length, 2);
+    assert.equal(pending.length, 3);
+    const presentNames = new Set(present.map((c) => c.filename));
+    assert.deepEqual(presentNames, written);
+    const pendingIds = new Set(pending.map((c) => c.id));
+    for (const cell of chosen.slice(2)) {
+      assert.ok(pendingIds.has(cell.id), `expected ${cell.id} to be pending`);
+    }
+
+    // buildInitialIndex threads present and pending into the on-disk shape the Rankings page
+    // reads: cells[].file must resolve on disk, pending[] must carry every unwritten cell.
+    const index = buildInitialIndex({
+      cells: present, pending, engineVersion: 'test',
+      generatedAt: '2026-09-22T00:00:00Z', previewMode: false,
+    });
+    assert.equal(index.cells.length, 2);
+    assert.equal(index.pending.length, 3);
+    for (const entry of index.cells) {
+      assert.ok(existsSync(join(tempDir, entry.file)),
+        `index.cells lists ${entry.file}, but the file is not on disk`);
+    }
+    // Pending entries carry the knob-vector shape the page uses to render the plan panel.
+    for (const entry of index.pending) {
+      for (const key of ['id', 'mode', 'preset', 'knobs', 'seeds', 'kind', 'file']) {
+        assert.ok(key in entry, `pending entry missing ${key}`);
+      }
+      assert.ok(!existsSync(join(tempDir, entry.file)),
+        `index.pending lists ${entry.file}, but the file does exist on disk`);
+    }
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('buildInitialIndex: pending array is a plain array when no pending cells are provided', () => {
+  const index = buildInitialIndex({
+    cells: [], engineVersion: 'v', generatedAt: 'now', previewMode: false,
+  });
+  assert.ok(Array.isArray(index.pending), 'pending should be an array even when empty');
+  assert.equal(index.pending.length, 0);
 });

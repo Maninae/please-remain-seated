@@ -208,6 +208,111 @@ export async function loadCellFile(filename) {
   return response.json();
 }
 
+// Cache for the preview index, used as a fallback source when the real index's cell files are
+// still being written. Shared across calls so we hit the network at most once.
+let previewIndexPromise = null;
+
+async function loadPreviewIndex() {
+  if (previewIndexPromise !== null) return previewIndexPromise;
+  previewIndexPromise = (async () => {
+    try {
+      const response = await fetch(`${RANKINGS_DIR}/index-preview.json`, { cache: 'no-store' });
+      if (!response.ok) return null;
+      const json = await response.json();
+      return (json && Array.isArray(json.cells)) ? json : null;
+    } catch { return null; }
+  })();
+  return previewIndexPromise;
+}
+
+async function tryFetchCell(filename) {
+  try {
+    const response = await fetch(`${RANKINGS_DIR}/${filename}`, { cache: 'no-store' });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch { return null; }
+}
+
+function findExactCell(indexObject, mode, preset, knobs) {
+  if (!indexObject || !Array.isArray(indexObject.cells)) return null;
+  return indexObject.cells.find(
+    (cell) => cell.mode === mode && cell.preset === preset && knobsEqual(cell.knobs, knobs),
+  ) || null;
+}
+
+function findHeadlineCell(indexObject, mode, preset) {
+  if (!indexObject || !Array.isArray(indexObject.cells)) return null;
+  return indexObject.cells.find(
+    (cell) => cell.mode === mode && cell.preset === preset && cell.kind === 'headline',
+  ) || null;
+}
+
+/**
+ * Load a cell file, gracefully falling back when the primary file is missing (a partial
+ * precompute run has not written it yet) or malformed.
+ *
+ * Fallback order:
+ *   1. `primary.file` from the loaded index.
+ *   2. The same (mode, preset, knobs) cell in `index-preview.json` if the preview build has it
+ *      at a different filename.
+ *   3. The headline cell for (mode, preset) in the loaded index.
+ * If every attempt fails, resolves to null so the caller can show the empty state.
+ *
+ * A single console.info line is written when a fallback path is taken or when everything
+ * fails; no console.error and no uncaught rejection ever escape this function.
+ */
+export async function loadCellWithFallback({ indexObject, mode, preset, knobs, primary }) {
+  const tried = [];
+  const seen = new Set([primary.file]);
+  const attempts = [{ meta: primary, label: 'primary' }];
+
+  // Preview equivalent of the primary: same (mode, preset, primary.knobs) in the preview
+  // index, written at PREVIEW_SEEDS so its filename is a distinct file. This covers the
+  // common case where a partial full-precompute run has not yet reached a cell that the
+  // preview build already wrote.
+  const previewIndex = await loadPreviewIndex();
+  if (previewIndex) {
+    const previewSamePrimary = findExactCell(previewIndex, mode, preset, primary.knobs);
+    if (previewSamePrimary && !seen.has(previewSamePrimary.file)) {
+      attempts.push({ meta: previewSamePrimary, label: 'preview' });
+      seen.add(previewSamePrimary.file);
+    }
+    // If the primary was itself a sensitivity cell and the preview only has the headline for
+    // this preset, still take the headline as a same-preset near neighbour.
+    const previewHeadline = findHeadlineCell(previewIndex, mode, preset);
+    if (previewHeadline && !seen.has(previewHeadline.file)) {
+      attempts.push({ meta: previewHeadline, label: 'preview-headline' });
+      seen.add(previewHeadline.file);
+    }
+  }
+
+  const headline = findHeadlineCell(indexObject, mode, preset);
+  if (headline && !seen.has(headline.file)) {
+    attempts.push({ meta: headline, label: 'headline' });
+    seen.add(headline.file);
+  }
+  void knobs;
+
+  for (let i = 0; i < attempts.length; i += 1) {
+    const { meta, label } = attempts[i];
+    const cellData = await tryFetchCell(meta.file);
+    tried.push(meta.file);
+    if (cellData) {
+      if (i > 0) {
+        // Single info line so a partial run does not spam the console.
+        // eslint-disable-next-line no-console
+        console.info(
+          `Rankings: primary cell ${primary.file} unavailable; using ${label} fallback ${meta.file}`,
+        );
+      }
+      return { cellData, cellMeta: meta, wasFallback: i > 0 };
+    }
+  }
+  // eslint-disable-next-line no-console
+  console.info(`Rankings: no cell available for ${mode}/${preset}; tried ${tried.join(', ')}`);
+  return null;
+}
+
 function knobsEqual(a, b) {
   if (!a || !b) return false;
   for (const key of ['load', 'compliance', 'groups', 'bags', 'bins']) {
