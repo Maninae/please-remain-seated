@@ -3,15 +3,25 @@
  * committed medians (no synthetic fixtures) so a regression in the policy fails at unit
  * time. Each test derives its expectations from the cell numbers, not from an SVG.
  *
- * Coverage against the round-14 contract:
- *   - Median resolution: no two on-scale medians land on the same 2 px slot at either the
- *     real desktop plot band OR the real phone plot band (both derived from the renderer's
- *     own computeStripsChartGeometry, round-11 R11-m1), unless they are within 5 s of each
- *     other on desktop and within a wider band-scaled tolerance on phone (the physical
- *     minimum a 400 px viewport can resolve for the slowest presets).
- *   - Every on-scale median is strictly inside (floor, cap).
- *   - Off-scale set = rows whose median is above (cap - 2% of plot band).
+ * Coverage against the round-16 contract (lead follow-up on R12-M2):
+ *   - Projection faithfulness (the tie guard's replacement). Every on-scale median's
+ *     projected x sits strictly inside (chartX0 + 2 px, chartX1 - 2 px) at BOTH the real
+ *     desktop plot band and the real phone plot band. No tolerance in seconds anywhere.
+ *     A preset that fails this fails the test with the row and its projected x printed.
+ *     The strict pair-printing block from round-16 R12-M2 survives as a DIAGNOSTIC log
+ *     (two extra tests below that print and pass) so close-neighbour pairs stay visible.
+ *   - Every on-scale median is strictly inside (floor, cap) in seconds.
+ *   - Off-scale set = rows whose median is STRICTLY above the cap (round-16 R12-m2). A
+ *     median within the top-of-axis legibility bracket causes the policy to raise the cap
+ *     one rung so the row stays on scale, rather than mislabelling it off scale.
  *   - Airline group span >= its round-15 regression ratchet on every narrowbody preset.
+ *
+ * What the projection guard catches (verified by construction below): (a) round-8's clamp
+ * defect (off-scale median drawn as a dot at the cap edge) via the off-scale/rowsOffScale
+ * pair invariant; (b) round-9's median-derived-from-tick-x tautology (fixed at round-9 by
+ * wiring up data-median-seconds so a clamping error surfaces as |drawn - projected| > 0)
+ * via the e2e half; (c) round-10 N10-M2's cap-side edge case, which the round-10 fix only
+ * covered on svgs[1], via the both-panels strict-inside window here.
  */
 
 import test from 'node:test';
@@ -22,6 +32,7 @@ import { computeStripsAxisPolicy, STRIPS_NICE_MINUTE_LADDER, isNarrowbodyStripsP
 import {
   computeStripsChartGeometry,
   STRIPS_PHONE_WIDTH_THRESHOLD,
+  STRIPS_PHONE_MEASURED_SVG_WIDTH,
 } from '../../js/render/charts-strips.js';
 
 const DATA_DIR = path.resolve('data/rankings');
@@ -64,25 +75,34 @@ function loadCellRows(mode, preset) {
 
 // Real SVG widths the app renders. compare.js clamps stripsWrap.clientWidth to [320, 1080]
 // and passes that as the SVG width attribute. The desktop viewport at 1280 leaves ~630 px
-// for the strips wrap after the tab rail + sidebar; the phone viewport at 400 gives ~400
-// (or the 320 clamp when the wrap is narrower). These constants drive the resolution test
-// at the same numbers the renderer uses, not at a made-up 720 px band (round-11 R11-m1).
+// for the strips wrap after the tab rail + sidebar; the phone viewport at 400 gives 330 px
+// once page padding and the tab rail are subtracted, which the renderer exports as
+// STRIPS_PHONE_MEASURED_SVG_WIDTH so this test uses the same number the browser draws
+// (round-16 R12-m1: was 400 here, a 25% overstatement of the real phone band).
 const DESKTOP_SVG_WIDTH = 630;
-const PHONE_SVG_WIDTH = 400;
-// Tie tolerance: two medians within 2 px must be within this many seconds of each other.
-// Floors at 5 s where the band can resolve it. Some presets (b737max8-lcc, b738-two-class,
-// a321neo-three-class) have plot spans over 800 s, so a 320 px desktop band or a 348 px
-// phone band cannot physically separate 5 s pairs no matter where the gutter is set. In
-// those cases the tolerance scales to the actual band's resolution floor (2 px worth of
-// seconds) plus a 0.5 s buffer for rounding.
-const DESKTOP_TIE_TOLERANCE_SECONDS = 5;
-const DESKTOP_TIE_BUFFER_SECONDS = 0.5;
+const PHONE_SVG_WIDTH = STRIPS_PHONE_MEASURED_SVG_WIDTH;
 
-const OFF_SCALE_MARGIN_FRACTION = 0.02;
-
-function offScaleThresholdSeconds(policy) {
-  return policy.capSeconds - policy.plotBandSeconds * OFF_SCALE_MARGIN_FRACTION;
-}
+// Round-16 (lead follow-up on R12-M2): the tie guard is replaced by a projection
+// faithfulness guard. Two airlines whose medians sit 5 s apart on a 3-4 s/px phone band
+// SHARE a pixel by physics, and asserting they must not is asserting a bound the design
+// cannot promise. The defects the guard actually needs to catch are axis-created:
+//   (a) a median tick drawn at a different x than the pure projection of its true value.
+//       Would catch round-8's clamp-to-cap defect (off-scale rows drawn as a dot at the
+//       cap edge) and round-9's median-derived-from-tick-x tautology (the fix wired up
+//       data-median-seconds so a clamping error surfaces as |drawn - projected| > 0).
+//   (b) a median tick sitting on the plot-band edge, either at cap-side or floor-side.
+//       Would catch round-10 N10-M2's cap-side edge case (which the fix at round-10 only
+//       covered on svgs[1], not the textbook panel); this clause covers BOTH edges.
+//   (c) an off-scale row emitting a median tick at all. Would catch any regression that
+//       leaks an off-scale row through the on-scale median branch (the round-8 clamped
+//       dot defect fell in the same class), and matches R12-M1's contract that off-scale
+//       rows print their value at the right gutter and never draw a tick.
+// The pair-printing block from the strict guard survives as a diagnostic log (below) so
+// close-neighbour pairs stay visible in the test output without being asserted.
+const MEDIAN_PROJECTION_TOLERANCE_PX = 0.75;
+const MEDIAN_EDGE_BUFFER_PX = 2;
+const DIAGNOSTIC_TIE_SECONDS = 5;
+const DIAGNOSTIC_TIE_PX = 2;
 
 function bandGeometryFor(preset, svgWidth) {
   const rows = loadCellRows('board', preset);
@@ -127,36 +147,122 @@ test('every on-scale median is strictly inside (floor, cap) on every narrowbody 
   }
 });
 
-test('rowsOffScale equals every row whose median sits above cap - 2% of the plot band', () => {
+test('rowsOffScale equals every row whose median sits STRICTLY above the cap', () => {
+  // Round-16 R12-m2: a median inside the cap is never labelled off scale. The raise pass
+  // in the policy lifts the cap past any median in the top-of-axis legibility bracket, so
+  // rowsOffScale is now exactly `median > cap`.
   for (const preset of NARROWBODY_PRESETS) {
     const rows = loadCellRows('board', preset);
     const policy = computeStripsAxisPolicy(rows, { preset });
-    const threshold = offScaleThresholdSeconds(policy);
     const expected = new Set();
     for (const row of rows) {
-      if (row.median >= threshold) expected.add(row.id);
+      if (row.median > policy.capSeconds + 1e-9) expected.add(row.id);
     }
     assert.deepEqual(
       [...policy.rowsOffScale].sort(),
       [...expected].sort(),
-      `${preset}: off-scale set must match cell-derived threshold (${threshold.toFixed(1)}s)`,
+      `${preset}: off-scale set must equal rows with median > cap (${policy.capSeconds.toFixed(1)}s)`,
     );
   }
 });
 
-function assertResolutionAtSvgWidth(svgWidth, label) {
+test('no on-scale row is labelled off scale: every row within the cap stays on the axis (round-16 R12-m2)', () => {
+  // Explicit sanity for the two presets the round-12 review named: b737max8-lcc's British
+  // Airways (median 1.3 s inside the 30:00 cap under the old rule) and a320's a320 default
+  // cluster must never be classified off scale when their median sits at or below cap.
+  const failures = [];
+  for (const preset of ['a320', 'b737max8-lcc']) {
+    const rows = loadCellRows('board', preset);
+    const policy = computeStripsAxisPolicy(rows, { preset });
+    for (const row of rows) {
+      if (policy.rowsOffScale.has(row.id) && row.median <= policy.capSeconds + 1e-9) {
+        failures.push(
+          `${preset}/${row.id}: median ${(row.median / 60).toFixed(2)}m sits INSIDE cap `
+          + `${(policy.capSeconds / 60).toFixed(2)}m but is labelled off scale`,
+        );
+      }
+    }
+  }
+  if (failures.length > 0) assert.fail(failures.join('\n'));
+});
+
+// Projection: chart geometry + policy uniquely determine the median tick's drawn x.
+// This is the same closed form the renderer uses; solving |drawn - projected| = 0 in the
+// unit case is a tautology, so the unit test's role is to guarantee the POLICY leaves
+// every projected on-scale median strictly inside (chartX0 + 2 px, chartX1 - 2 px). The
+// e2e test then compares the SVG's data-median-seconds to its x1 against the same 0.75 px
+// bound, which is where a real renderer bug surfaces.
+function projectMedianX(medianSeconds, floor, cap, chartX0, plotBandPx) {
+  return chartX0 + ((medianSeconds - floor) / Math.max(1e-9, cap - floor)) * plotBandPx;
+}
+
+function assertFaithfulProjectionAtSvgWidth(svgWidth, label) {
+  const failures = [];
+  for (const preset of NARROWBODY_PRESETS) {
+    const { rows, policy, geom } = bandGeometryFor(preset, svgWidth);
+    for (const row of rows) {
+      if (policy.rowsOffScale.has(row.id)) continue;
+      const projectedX = projectMedianX(
+        row.median, policy.floorSeconds, policy.capSeconds, geom.chartX0, geom.plotBandPx,
+      );
+      const lowerBound = geom.chartX0 + MEDIAN_EDGE_BUFFER_PX;
+      const upperBound = geom.chartX1 - MEDIAN_EDGE_BUFFER_PX;
+      if (projectedX <= lowerBound + 1e-9 || projectedX >= upperBound - 1e-9) {
+        failures.push(
+          `${preset}: ${label} band ${geom.plotBandPx.toFixed(0)} px on ${svgWidth} px svg: `
+          + `${row.id} median ${row.median.toFixed(1)} s projects to x=${projectedX.toFixed(2)} px `
+          + `outside the strict-inside window (${lowerBound.toFixed(2)}, ${upperBound.toFixed(2)})`,
+        );
+      }
+    }
+  }
+  if (failures.length > 0) {
+    assert.fail(
+      `projection faithfulness (edge buffer) violated at ${label}:\n  ${failures.join('\n  ')}`,
+    );
+  }
+}
+
+test('projection faithfulness: every on-scale median projects strictly inside (chartX0 + 2 px, chartX1 - 2 px) at the desktop plot band', () => {
+  // Catches round-10 N10-M2 (a median tick on the plot-band edge; the round-10 fix only
+  // touched svgs[1], leaving the textbook panel exposed) on BOTH panels.
+  assertFaithfulProjectionAtSvgWidth(DESKTOP_SVG_WIDTH, 'desktop');
+});
+
+test('projection faithfulness: every on-scale median projects strictly inside (chartX0 + 2 px, chartX1 - 2 px) at the phone plot band', () => {
+  assertFaithfulProjectionAtSvgWidth(PHONE_SVG_WIDTH, 'phone');
+});
+
+test('projection faithfulness: no off-scale row carries an on-scale median (policy invariant)', () => {
+  // Catches round-8's clamp-to-cap defect (an off-scale row drawn as a dot pinned to the
+  // cap edge): the policy must classify the row as off-scale AND the renderer must skip
+  // its median tick. This test locks the policy half; the e2e test locks the renderer
+  // half by asserting that no <line data-median-seconds> shares a data-row-id with any
+  // <text data-row-off-scale>.
+  for (const preset of NARROWBODY_PRESETS) {
+    const rows = loadCellRows('board', preset);
+    const policy = computeStripsAxisPolicy(rows, { preset });
+    for (const row of rows) {
+      if (row.median > policy.capSeconds + 1e-9) {
+        assert.ok(
+          policy.rowsOffScale.has(row.id),
+          `${preset}: row ${row.id} median ${row.median.toFixed(1)}s > cap ${policy.capSeconds.toFixed(1)}s `
+          + `but is NOT in policy.rowsOffScale`,
+        );
+      }
+    }
+  }
+});
+
+// Diagnostic log: print (but do not assert on) any pair of on-scale medians whose true
+// values differ by more than 5 s and whose projected positions fall inside 2 px of each
+// other. Lead's decision (round-16): two airlines 5 s apart on a 3-4 s/px phone band
+// share a pixel by physics, so this is close-neighbour information, not a defect.
+function logCloseNeighboursAtSvgWidth(svgWidth, label) {
+  const lines = [];
   for (const preset of NARROWBODY_PRESETS) {
     const { rows, policy, geom } = bandGeometryFor(preset, svgWidth);
     const pxPerSec = geom.plotBandPx / policy.plotBandSeconds;
-    // Tolerance is 5 s where the band can resolve it, or the physical floor plus a small
-    // buffer where it cannot. The physical floor is 2 px worth of seconds at the actual
-    // band; two medians closer than that MUST collapse below 2 px on any honest linear
-    // projection, and no policy change moves them apart. This is the same rule the fix
-    // round applies at both desktop and phone: it holds strict 5 s where the band is wide
-    // enough (crj700, e175) and scales to a slightly wider bound (~5-7 s) on the slower
-    // presets whose plot span exceeds 800 s.
-    const minResolvableSeconds = 2 / pxPerSec + DESKTOP_TIE_BUFFER_SECONDS;
-    const tolerance = Math.max(DESKTOP_TIE_TOLERANCE_SECONDS, minResolvableSeconds);
     const onScale = rows.filter((r) => !policy.rowsOffScale.has(r.id));
     for (let i = 0; i < onScale.length; i += 1) {
       for (let j = i + 1; j < onScale.length; j += 1) {
@@ -164,25 +270,29 @@ function assertResolutionAtSvgWidth(svgWidth, label) {
         const b = onScale[j];
         const dSeconds = Math.abs(a.median - b.median);
         const dPx = dSeconds * pxPerSec;
-        if (dPx < 2 && dSeconds >= tolerance) {
-          assert.fail(
-            `${preset}: ${label} band (${geom.plotBandPx} px on ${svgWidth} px svg, `
-            + `tolerance ${tolerance.toFixed(1)} s): on-scale medians ${a.id} (${a.median.toFixed(1)}s) `
-            + `and ${b.id} (${b.median.toFixed(1)}s) collapse into ${dPx.toFixed(2)} px `
-            + `while differing by ${dSeconds.toFixed(1)} s`,
+        if (dPx < DIAGNOSTIC_TIE_PX && dSeconds > DIAGNOSTIC_TIE_SECONDS) {
+          lines.push(
+            `${preset}: ${a.id} ${a.median.toFixed(1)}s / ${b.id} ${b.median.toFixed(1)}s: `
+            + `${dPx.toFixed(2)} px apart, ${dSeconds.toFixed(1)} s apart`,
           );
         }
       }
     }
   }
+  if (lines.length === 0) {
+    console.log(`  ${label}: no close-neighbour pairs (>5 s apart, <2 px apart).`);
+  } else {
+    console.log(`  ${label} close-neighbour pairs (>5 s apart but <2 px on the band, physical, not defects):`);
+    for (const line of lines) console.log(`    ${line}`);
+  }
 }
 
-test('no two on-scale medians share a 2 px slot at the real desktop plot band beyond a band-scaled 5 s tolerance', () => {
-  assertResolutionAtSvgWidth(DESKTOP_SVG_WIDTH, 'desktop');
+test('diagnostic (not an assertion): close-neighbour pairs at the desktop plot band', () => {
+  logCloseNeighboursAtSvgWidth(DESKTOP_SVG_WIDTH, 'desktop');
 });
 
-test('no two on-scale medians share a 2 px slot at the real phone plot band beyond a band-scaled 5 s tolerance', () => {
-  assertResolutionAtSvgWidth(PHONE_SVG_WIDTH, 'phone');
+test('diagnostic (not an assertion): close-neighbour pairs at the phone plot band', () => {
+  logCloseNeighboursAtSvgWidth(PHONE_SVG_WIDTH, 'phone');
 });
 
 test('every off-scale row is listed in policy.rowsOffScale', () => {

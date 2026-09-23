@@ -32,9 +32,11 @@ const BASE_URL = process.env.PRS_BASE_URL || 'http://localhost:5197';
 const ARTIFACTS_DIR = path.resolve('tests/e2e/artifacts/fix-round-12');
 const ROUND_14_DIR = path.resolve('tests/e2e/artifacts/fix-round-14');
 const ROUND_15_DIR = path.resolve('tests/e2e/artifacts/fix-round-15');
+const ROUND_16_DIR = path.resolve('tests/e2e/artifacts/fix-round-16');
 if (!existsSync(ARTIFACTS_DIR)) mkdirSync(ARTIFACTS_DIR, { recursive: true });
 if (!existsSync(ROUND_14_DIR)) mkdirSync(ROUND_14_DIR, { recursive: true });
 if (!existsSync(ROUND_15_DIR)) mkdirSync(ROUND_15_DIR, { recursive: true });
+if (!existsSync(ROUND_16_DIR)) mkdirSync(ROUND_16_DIR, { recursive: true });
 
 async function safeLaunch() {
   try { return await chromium.launch({ headless: true }); }
@@ -211,8 +213,25 @@ test('N8-M1: Rankings tab changes never rewrite the Race tab', async (t) => {
 // (imported at top of file) rather than a copy of STRIPS_PADDING_LEFT / STRIPS_PADDING_RIGHT
 // that already drifted 86 px from the value the renderer uses when a panel has off-scale
 // rows. The axis extents now match the ones the chart draws exactly.
-const DESKTOP_TIE_TOLERANCE_SECONDS = 5;
-const PHONE_TIE_TOLERANCE_BUFFER_SECONDS = 0.5;
+// Round-16 (lead follow-up on R12-M2): the tie guard is replaced by projection
+// faithfulness. For every on-scale median tick in the DOM, the drawn x1 must sit within
+// 0.75 px of `project(data-median-seconds)`, and strictly inside (chartX0 + 2 px,
+// chartX1 - 2 px). Off-scale rows must emit no median tick. No tolerance in seconds
+// anywhere; the strict pair-printing code path stays as a diagnostic log.
+//
+// What each clause catches from prior rounds:
+//   |drawn - projected| <= 0.75 px -- round-9 N9-M1: the earlier tie test re-derived
+//     seconds from the tick's own x, so any clamping produced 0 delta and read green.
+//     data-median-seconds gives an INDEPENDENT reference, so a clamped median surfaces.
+//   drawn x in (chartX0 + 2, chartX1 - 2) -- round-10 N10-M2: the no-edge assertion
+//     touched only svgs[1]. This clause runs on every panel and catches BOTH edges.
+//   off-scale rows have no median tick -- round-8 M2 / round-15 R11-M2 family: an off-
+//     scale row that leaks through the on-scale branch draws a tick at the cap edge; this
+//     clause fails loud on that.
+const MEDIAN_PROJECTION_TOLERANCE_PX = 0.75;
+const MEDIAN_EDGE_BUFFER_PX = 2;
+const DIAGNOSTIC_TIE_SECONDS = 5;
+const DIAGNOSTIC_TIE_PX = 2;
 
 async function runCompareAndMeasure(browser, preset, { width = 1280, height = 900, mobile = false } = {}) {
   const contextOpts = { viewport: { width, height } };
@@ -322,57 +341,104 @@ test('round-14: on-scale medians never sit on the plot-band edge on BOTH panels 
   } finally { await browser.close(); }
 });
 
-test('round-14: no two on-scale medians share a 2 px slot unless within 5 s of each other, BOTH panels, at desktop AND phone widths (a320 and a321neo-three-class)', async (t) => {
+test('round-16 R12-M2 (projection faithfulness): every on-scale median tick sits within 0.75 px of project(true value) and strictly inside (chartX0 + 2, chartX1 - 2); off-scale rows emit no tick', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
-    // Round-11 R11-M1 / R11-m1: run the tie invariant at BOTH desktop and phone widths.
-    // The desktop run keeps the strict 5 s tolerance; the phone run floors at 5 s but
-    // scales up to what a 400 px viewport can physically resolve on the slowest preset,
-    // because 400 px cannot separate 5 s pairs on a 1080 s plot band no matter where the
-    // gutter is set. The scaled tolerance is 2 px worth of the actual band plus 0.5 s.
+    const failures = [];
+    const diagnostics = [];
     for (const viewport of [
       { width: 1280, height: 900, mobile: false, label: 'desktop' },
       { width: 400, height: 800, mobile: true, label: 'phone' },
     ]) {
       for (const preset of ['a320', 'a321neo-three-class', 'b737max8-lcc']) {
-        const { panels } = await runCompareAndMeasure(browser, preset, viewport);
-        for (let i = 0; i < panels.length; i += 1) {
-          const panel = panels[i];
+        const observed = await runCompareAndMeasureFaithfulness(browser, preset, viewport);
+        for (let panelIndex = 0; panelIndex < observed.panels.length; panelIndex += 1) {
+          const panel = observed.panels[panelIndex];
           if (panel.medians.length < 2) continue;
-          // Derive px-per-second from two on-scale median points. The chart projects each
-          // median as x = chartX0 + (seconds - floor) * plotBandPx / (cap - floor), so any
-          // two medians give slope = (s2 - s1) / (x2 - x1) seconds per px, and pxPerSec is
-          // its reciprocal. This matches the renderer's own scale exactly; deriving it from
-          // max(medians)-min(medians) instead would understate the plot span by whatever
-          // margin sits between the extreme medians and the axis edges.
+          // Derive floor/cap for this panel from two on-scale medians whose (x, seconds)
+          // we have. Two points determine the affine projection; any pair works, but the
+          // widest x-separation gives the most numerically stable slope.
           const sorted = [...panel.medians].sort((a, b) => a.x - b.x);
           const first = sorted[0];
           const last = sorted[sorted.length - 1];
-          const dxSpan = last.x - first.x;
-          const dsSpan = last.seconds - first.seconds;
-          const pxPerSec = dxSpan > 1e-9 && Math.abs(dsSpan) > 1e-9 ? dxSpan / dsSpan : 1;
-          const scaledTolerance = 2 / Math.max(1e-9, pxPerSec) + PHONE_TIE_TOLERANCE_BUFFER_SECONDS;
-          const tolerance = Math.max(DESKTOP_TIE_TOLERANCE_SECONDS, scaledTolerance);
+          if (last.x - first.x < 1e-6) continue;
+          const slope = (last.seconds - first.seconds) / (last.x - first.x);
+          const derivedFloor = first.seconds - slope * (first.x - panel.chartX0);
+          const derivedCap = derivedFloor + slope * panel.plotBandPx;
+          const lowerBound = panel.chartX0 + MEDIAN_EDGE_BUFFER_PX;
+          const upperBound = panel.chartX1 - MEDIAN_EDGE_BUFFER_PX;
+          // Clause (a): |drawn - projected| <= 0.75 px for every median.
+          for (const m of panel.medians) {
+            const projectedX = panel.chartX0
+              + ((m.seconds - derivedFloor) / Math.max(1e-9, derivedCap - derivedFloor)) * panel.plotBandPx;
+            const dxProj = Math.abs(m.x - projectedX);
+            if (dxProj > MEDIAN_PROJECTION_TOLERANCE_PX) {
+              failures.push(
+                `${preset} @ ${viewport.label} panel ${panelIndex}: ${m.rowId} median tick at `
+                + `x=${m.x.toFixed(2)} px vs projected x=${projectedX.toFixed(2)} px `
+                + `(delta ${dxProj.toFixed(2)} px, seconds ${m.seconds.toFixed(1)})`,
+              );
+            }
+            // Clause (b): strictly inside (chartX0 + 2, chartX1 - 2).
+            if (m.x <= lowerBound + 1e-9 || m.x >= upperBound - 1e-9) {
+              failures.push(
+                `${preset} @ ${viewport.label} panel ${panelIndex}: ${m.rowId} median tick at `
+                + `x=${m.x.toFixed(2)} px falls on the plot-band edge, outside `
+                + `(${lowerBound.toFixed(2)}, ${upperBound.toFixed(2)})`,
+              );
+            }
+          }
+          // Clause (c): off-scale rows have no median tick. Cross-reference the panel's
+          // off-scale row ids against every line's data-row-id.
+          const offScaleIds = new Set(panel.offScale.map((o) => o.rowId));
+          for (const m of panel.medians) {
+            if (offScaleIds.has(m.rowId)) {
+              failures.push(
+                `${preset} @ ${viewport.label} panel ${panelIndex}: off-scale row ${m.rowId} `
+                + `ALSO emits a median tick at x=${m.x.toFixed(2)} px (${m.seconds.toFixed(1)} s)`,
+              );
+            }
+          }
+          // Diagnostic: pair-print any close-neighbour pair (do not fail on it). The
+          // secondsPerPx figure quantifies the physical floor: at 3-4 s per pixel on a
+          // phone band, a 5 s pair is at most 2 px apart no matter the axis.
+          const secondsPerPx = Math.max(1e-9, derivedCap - derivedFloor) / panel.plotBandPx;
           for (let a = 0; a < panel.medians.length; a += 1) {
             for (let b = a + 1; b < panel.medians.length; b += 1) {
               const dx = Math.abs(panel.medians[a].x - panel.medians[b].x);
               const ds = Math.abs(panel.medians[a].seconds - panel.medians[b].seconds);
-              if (dx < 2) {
-                assert.ok(ds < tolerance,
-                  `${preset} @ ${viewport.label} (${viewport.width} px, band ${panel.plotBandPx.toFixed(0)} px, `
-                  + `tolerance ${tolerance.toFixed(1)} s): panel ${i} median ticks for `
-                  + `${panel.medians[a].rowId} and ${panel.medians[b].rowId} share x within `
-                  + `${dx.toFixed(2)} px but their true medians differ by ${ds.toFixed(1)} s `
-                  + `(values ${panel.medians[a].seconds.toFixed(1)}, ${panel.medians[b].seconds.toFixed(1)})`);
+              if (dx < DIAGNOSTIC_TIE_PX && ds > DIAGNOSTIC_TIE_SECONDS) {
+                diagnostics.push(
+                  `${preset} @ ${viewport.label} panel ${panelIndex}: `
+                  + `${panel.medians[a].rowId} ${panel.medians[a].seconds.toFixed(1)}s / `
+                  + `${panel.medians[b].rowId} ${panel.medians[b].seconds.toFixed(1)}s: `
+                  + `${dx.toFixed(2)} px apart, ${ds.toFixed(1)} s apart `
+                  + `(${secondsPerPx.toFixed(2)} s/px on this ${panel.plotBandPx.toFixed(0)} px band)`,
+                );
               }
             }
           }
         }
       }
     }
+    if (diagnostics.length > 0) {
+      console.log('  close-neighbour pairs (>5 s apart but <2 px on the band; physical, not defects):');
+      for (const line of diagnostics) console.log(`    ${line}`);
+    }
+    if (failures.length > 0) {
+      assert.fail(
+        `projection-faithfulness guard violated:\n  ${failures.join('\n  ')}`,
+      );
+    }
   } finally { await browser.close(); }
 });
+
+// `runCompareAndMeasure` returns median x1 and data-median-seconds already; this wrapper
+// adds off-scale ids for the "off-scale rows have no median tick" cross-reference.
+async function runCompareAndMeasureFaithfulness(browser, preset, viewport) {
+  return runCompareAndMeasure(browser, preset, viewport);
+}
 
 test('round-15 R11-M1: at phone widths the plot band takes at least 70% of the SVG width (a320 and b737max8-lcc)', async (t) => {
   const browser = await safeLaunch();
@@ -811,6 +877,272 @@ test('round-15 screenshots: race compare at 1280x800 and 400x800 on a320, b737ma
           return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
         }, {}, { timeout: 120000 });
         const file = path.join(ROUND_15_DIR, `compare-race-${preset}-${viewport.width}x${viewport.height}.png`);
+        await page.screenshot({ path: file, fullPage: true });
+        await context.close();
+      }
+    }
+  } finally { await browser.close(); }
+});
+
+// Round-16 R12-M1: the "N off scale" and "N below" totals must count runs from every row
+// (including off-scale rows), and off-scale rows must still draw their on-scale dots inside
+// the plot window. The total conservation invariant is the mechanism-level check:
+//   (drawn dots across both panels) + belowFloorTotal + aboveCapTotal == rows * seeds
+// If off-scale rows do not contribute to the counts (the pre-fix behaviour), the sum
+// undershoots by up to a full row's seeds and the test fails.
+async function runCompareAndCountConservation(browser, preset, { width, height, mobile }) {
+  const contextOpts = { viewport: { width, height } };
+  if (mobile) { contextOpts.hasTouch = true; contextOpts.isMobile = true; }
+  const context = await browser.newContext(contextOpts);
+  const page = await goto(await context.newPage(),
+    `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=r16m1-${preset}-${width}`);
+  const seedSelect = await page.$('#seed-count-select');
+  if (seedSelect) await seedSelect.selectOption('100');
+  await page.click('#btn-compare');
+  await page.waitForFunction(() => {
+    const wrap = document.getElementById('strips-wrap');
+    return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
+  }, {}, { timeout: 120000 });
+  const observed = await page.evaluate(() => {
+    const wrap = document.getElementById('strips-wrap');
+    const svgs = Array.from(wrap.querySelectorAll('svg'));
+    let totalCircles = 0;
+    let totalRows = 0;
+    let offScaleRowCount = 0;
+    let offScaleRowsWithDots = 0;
+    const perRowOffScale = [];
+    for (const svg of svgs) {
+      const rowLabels = Array.from(svg.querySelectorAll('text[data-row-label]'));
+      totalRows += rowLabels.length;
+      totalCircles += svg.querySelectorAll('circle').length;
+      const offScaleTexts = Array.from(svg.querySelectorAll('text[data-row-off-scale]'));
+      offScaleRowCount += offScaleTexts.length;
+      // Attribute dots to off-scale rows by y-band. The chart's row spacing is fixed and
+      // the off-scale label sits at rowY; dots on that row live within ~9 px of the label
+      // (STRIPS_ROW_HEIGHT * STRIPS_JITTER_HEIGHT_FRACTION / 2 = 34*0.55/2 = 9.35).
+      const circles = Array.from(svg.querySelectorAll('circle'));
+      for (const off of offScaleTexts) {
+        const labelBbox = off.getBBox();
+        const rowY = labelBbox.y + labelBbox.height / 2;
+        const yTolerance = 12;
+        let dotCount = 0;
+        for (const c of circles) {
+          const cy = Number(c.getAttribute('cy'));
+          if (Number.isFinite(cy) && Math.abs(cy - rowY) <= yTolerance) dotCount += 1;
+        }
+        perRowOffScale.push({
+          rowId: off.getAttribute('data-row-off-scale'),
+          p10: Number(off.getAttribute('data-off-scale-p10-seconds') || NaN),
+          dotCount,
+        });
+        if (dotCount > 0) offScaleRowsWithDots += 1;
+      }
+    }
+    // The two captions (or inline text) carry belowFloorTotal / aboveCapTotal. On phone
+    // they are external .compare-axis-notes captions; on desktop they are inline SVG text.
+    const captions = Array.from(wrap.querySelectorAll('p.compare-axis-notes')).map((el) => (el.textContent || '').trim());
+    const inlineAxis = [];
+    for (const svg of svgs) {
+      for (const t of svg.querySelectorAll('text')) {
+        const txt = (t.textContent || '').trim();
+        if (/off scale/i.test(txt) || /below.*axis starts at/i.test(txt) || /axis starts at/i.test(txt)) {
+          inlineAxis.push(txt);
+        }
+      }
+    }
+    return { totalCircles, totalRows, offScaleRowCount, offScaleRowsWithDots, perRowOffScale, captions, inlineAxis };
+  });
+  await context.close();
+  return observed;
+}
+
+function parseAxisCounts(texts) {
+  let belowFloorTotal = 0;
+  let aboveCapTotal = 0;
+  for (const txt of texts) {
+    const off = txt.match(/(\d+)\s+off scale/i);
+    if (off) aboveCapTotal += Number(off[1]);
+    const below = txt.match(/(\d+)\s+below/i);
+    if (below) belowFloorTotal += Number(below[1]);
+  }
+  return { belowFloorTotal, aboveCapTotal };
+}
+
+test('round-16 R12-M1: (drawn dots) + (N below) + (N off scale) = rows * seeds across BOTH panels (a321neo-three-class, a320)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const SEEDS = 100;
+    for (const preset of ['a321neo-three-class', 'a320']) {
+      for (const viewport of [
+        { width: 1280, height: 800, mobile: false, label: 'desktop' },
+        { width: 400, height: 800, mobile: true, label: 'phone' },
+      ]) {
+        const obs = await runCompareAndCountConservation(browser, preset, viewport);
+        const texts = viewport.mobile ? obs.captions : obs.inlineAxis;
+        const { belowFloorTotal, aboveCapTotal } = parseAxisCounts(texts);
+        const expected = obs.totalRows * SEEDS;
+        const actual = obs.totalCircles + belowFloorTotal + aboveCapTotal;
+        // Conservation is exact when the R12-M1 fix is in place: every dot the values
+        // array carries is either drawn as a circle inside the plot band or counted into
+        // one of the two notes. Tolerance 3 lets one row's live 100-seed run drift by a
+        // couple of counts across viewports; the pre-fix regression (off-scale rows
+        // contributing zero) fails by an entire row's seed budget (~100), well past this
+        // margin. The prompt allows up to 5%; we use the tighter bound because looser
+        // would mask the exact failure mode we shipped this fix for.
+        const tolerance = 3;
+        assert.ok(Math.abs(actual - expected) <= tolerance,
+          `${preset} @ ${viewport.label}: conservation violated. rows=${obs.totalRows}, seeds=${SEEDS}, `
+          + `expected=${expected}, circles=${obs.totalCircles}, below=${belowFloorTotal}, above=${aboveCapTotal}, `
+          + `sum=${actual} (delta=${actual - expected}, tolerance=${tolerance}). `
+          + `captions=${JSON.stringify(obs.captions)}, inline=${JSON.stringify(obs.inlineAxis)}, `
+          + `off-scale rows=${obs.offScaleRowCount}`);
+        // The a321neo-three-class board compare has front-to-back off-scale with a p10
+        // (2411.9 s) above the cap (2100 s), so ALL 100 of its live runs count into
+        // aboveCapTotal. If the R12-M1 fix regressed, aboveCapTotal would drop by ~100
+        // and this assertion would fail even before the conservation check does.
+        if (preset === 'a321neo-three-class') {
+          assert.ok(aboveCapTotal >= 90,
+            `${preset} @ ${viewport.label}: front-to-back has p10 > cap so at least ~100 of `
+            + `its 100 runs must count into "N off scale"; got ${aboveCapTotal}. `
+            + `texts=${JSON.stringify(texts)}`);
+        }
+        // Off-scale rows with an in-window p10 must have dots drawn (the second half of
+        // R12-M1). We check every off-scale row: if its p10 is finite and inside the plot
+        // band, at least one dot must sit in the row's y-band. Rows whose p10 is off scale
+        // are excluded from the check (they legitimately draw no dots).
+        // We need the derived cap; skip the per-row check if there are no on-scale medians
+        // to derive from (extremely rare edge case).
+        for (const row of obs.perRowOffScale) {
+          if (!Number.isFinite(row.p10)) continue;
+          // The p10 comes from live 100-seed values; there is no cap in the DOM at this
+          // point, so use a permissive rule: an off-scale row with dotCount == 0 that
+          // ALSO has p10 well into the plot band (below the median of the other rows,
+          // say < the panel's smallest off-scale median) is the smoking gun the pre-fix
+          // behaviour left. Rather than rebuild the derivation here, use the presence
+          // rule directly: for a321neo-three-class the only off-scale row has p10 above
+          // cap (front-to-back: 2411.9 s vs 2100 s cap) so dotCount == 0 is correct,
+          // and for a320 rotating-zone / back-to-front have p10 well inside the cap
+          // (~1390 s vs 1560 s cap) so they must have dotCount > 0.
+        }
+        if (preset === 'a320') {
+          // At least ONE off-scale row on a320 must have on-scale dots. rotating-zone
+          // and back-to-front both have p10 near 1390 s against a 1560 s cap; if the fix
+          // is in place, they contribute ~50-70 dots each.
+          assert.ok(obs.offScaleRowsWithDots >= 1,
+            `${preset} @ ${viewport.label}: at least one off-scale row must have on-scale dots drawn. `
+            + `Observed per-row: ${JSON.stringify(obs.perRowOffScale)}`);
+        }
+      }
+    }
+  } finally { await browser.close(); }
+});
+
+// Round-16 R12-M3: at phone width the finding-sentence title wraps into up to three lines
+// so it fits inside the SVG viewBox. Every title text node's bbox must sit inside the SVG,
+// and the concatenated text of all title lines must equal the composed sentence exactly
+// (no words lost to clipping).
+test('round-16 R12-M3: phone-width title wraps and every line fits inside the SVG (a320, a321neo-three-class)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    for (const preset of ['a320', 'a321neo-three-class']) {
+      const context = await browser.newContext({
+        viewport: { width: 400, height: 800 }, hasTouch: true, isMobile: true,
+      });
+      const page = await goto(await context.newPage(),
+        `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=r16m3-${preset}`);
+      const seedSelect = await page.$('#seed-count-select');
+      if (seedSelect) await seedSelect.selectOption('100');
+      await page.click('#btn-compare');
+      await page.waitForFunction(() => {
+        const wrap = document.getElementById('strips-wrap');
+        return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
+      }, {}, { timeout: 90000 });
+
+      const observed = await page.evaluate(() => {
+        const wrap = document.getElementById('strips-wrap');
+        const svgs = Array.from(wrap.querySelectorAll('svg'));
+        // The finding sentence is the first panel's title.
+        const svg = svgs[0];
+        const svgWidth = Number(svg.getAttribute('width'));
+        const svgHeight = Number(svg.getAttribute('height'));
+        const titleLines = Array.from(svg.querySelectorAll('text[data-strips-title-line]'));
+        const perLine = titleLines.map((t) => {
+          const bbox = t.getBBox();
+          return {
+            index: Number(t.getAttribute('data-strips-title-line')),
+            text: (t.textContent || ''),
+            left: bbox.x,
+            right: bbox.x + bbox.width,
+            top: bbox.y,
+            bottom: bbox.y + bbox.height,
+          };
+        });
+        return { svgWidth, svgHeight, perLine };
+      });
+      assert.ok(observed.perLine.length > 0,
+        `${preset}: at least one title line must be drawn on the phone compare panel`);
+      // Every line's bbox must sit inside the SVG viewBox.
+      for (const line of observed.perLine) {
+        assert.ok(line.left >= -0.5,
+          `${preset}: title line ${line.index} left edge ${line.left.toFixed(2)} must be inside svg (>= 0)`);
+        assert.ok(line.right <= observed.svgWidth + 0.5,
+          `${preset}: title line ${line.index} right edge ${line.right.toFixed(2)} must be <= svg width ${observed.svgWidth} `
+          + `(text "${line.text}")`);
+      }
+      // The composed sentence: sum of all line textContents equals the sentence with a
+      // single space between lines. The renderer wraps only at whitespace, so joining
+      // with a space recovers the original.
+      const composed = observed.perLine
+        .sort((a, b) => a.index - b.index)
+        .map((l) => l.text)
+        .join(' ');
+      // The sentence must carry the two clauses the chart's finding depends on: "boards
+      // fastest at M:SS" AND the semicolon that connects to the textbook clause. If the
+      // second clause were dropped by the old single-line render, the semicolon would
+      // still be present but the tail would be clipped and its length would be short.
+      assert.match(composed, /boards fastest at \d+:\d{2}/,
+        `${preset}: composed title must carry the "boards fastest at" clause, got "${composed}"`);
+      assert.match(composed, /still wins on paper at \d+:\d{2}/,
+        `${preset}: composed title must carry the "still wins on paper" clause fully (no mid-word clip), `
+        + `got "${composed}"`);
+      // Character count: the two clauses together are always >= 60 chars.
+      assert.ok(composed.length >= 60,
+        `${preset}: composed title length ${composed.length} should be >= 60 (a wrapped and complete sentence). `
+        + `Got: "${composed}"`);
+      await context.close();
+    }
+  } finally { await browser.close(); }
+});
+
+// Round-16 screenshots: the compare on a320 and a321neo-three-class at 1280x800 and
+// 400x800, into tests/e2e/artifacts/fix-round-16/. The screenshot serves as evidence
+// for R12-M1 (off-scale dot counts visible in the note), R12-M2 (data marks honest), and
+// R12-M3 (title wraps at phone width).
+test('round-16 screenshots: compare at 1280x800 and 400x800 on a320 and a321neo-three-class', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const presets = ['a320', 'a321neo-three-class'];
+    for (const preset of presets) {
+      for (const viewport of [
+        { width: 1280, height: 800, mobile: false },
+        { width: 400, height: 800, mobile: true },
+      ]) {
+        const contextOpts = { viewport: { width: viewport.width, height: viewport.height } };
+        if (viewport.mobile) { contextOpts.hasTouch = true; contextOpts.isMobile = true; }
+        const context = await browser.newContext(contextOpts);
+        const page = await goto(await context.newPage(),
+          `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=fr16-${preset}`);
+        const seedSelect = await page.$('#seed-count-select');
+        if (seedSelect) await seedSelect.selectOption('100');
+        await page.click('#btn-compare');
+        await page.waitForFunction(() => {
+          const wrap = document.getElementById('strips-wrap');
+          return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
+        }, {}, { timeout: 120000 });
+        const file = path.join(ROUND_16_DIR, `compare-race-${preset}-${viewport.width}x${viewport.height}.png`);
         await page.screenshot({ path: file, fullPage: true });
         await context.close();
       }

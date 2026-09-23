@@ -22,10 +22,14 @@
  *     slightly wider band is worth keeping the airline neighbours on scale.
  *     capStepInfo.stopReason records the step-down outcome; capStepInfo.raisedForOffScaleCap
  *     records whether the follow-up widened the cap.
- *   - Off-scale rows: any median above the cap, OR within 2% of the cap (a legibility
- *     bracket so nothing draws on the axis edge, ties with the cap tick, or reads as the
- *     top of the axis when its true value is off). Off-scale rows draw as a broken bar in
- *     the right gutter with the true value printed; NEVER as a clamped dot on the cap.
+ *   - Off-scale rows: any median STRICTLY above the cap. A median within 2% of the cap
+ *     used to be treated as off-scale ("legibility bracket"), but this labelled rows with a
+ *     median inside the cap "(off scale)" beside an axis whose top tick equalled or
+ *     exceeded that value. The cap-raise pass below now handles the legibility case: if
+ *     any on-scale median sits within 2% of the cap, the cap steps UP one rung so the
+ *     median comfortably clears the top of the axis, and the row stays on-scale. Off-scale
+ *     rows draw as a broken bar in the right gutter with the true value printed; NEVER as
+ *     a clamped dot on the cap. (round-16 R12-m2)
  *   - Dot counts per row: p10-p90 dots outside the [floor, cap] window count into the
  *     "N below" and "N off scale" edge marks. Off-scale rows contribute zero to these
  *     counts because they are treated as separate rows entirely.
@@ -132,14 +136,14 @@ export function computeStripsAxisPolicy(rows, opts = {}) {
     };
   }
 
-  // Lead follow-up: cap the off-scale population at MAX_OFF_SCALE_ROWS. If the current cap
-  // pushes more than three rows off scale (medians above the cap, or within 2% of it),
-  // walk the ladder UP one rung at a time until at most three rows would be off scale or
-  // the ladder ends. Widening the band trades a little empty frame for keeping the
-  // airline cluster's tightest neighbours on scale, which the b717 and b737max8-lcc cells
-  // otherwise render as a slab of broken bars in the right gutter.
+  // Lead follow-up: cap the off-scale population at MAX_OFF_SCALE_ROWS AND keep any on-scale
+  // median clear of the top-of-axis legibility bracket. If the current cap either pushes
+  // more than three rows above the cap, OR leaves an on-scale median within 2% of the cap
+  // (round-16 R12-m2: a row at cap - 1.3 s reads as "at the axis edge" and used to be
+  // mislabelled off scale), walk the ladder UP one rung at a time until both conditions
+  // hold or the ladder ends.
   {
-    const raiseResult = raiseCapToBoundOffScale({
+    const raiseResult = raiseCapForOffScaleAndLegibility({
       startCap: capSeconds,
       floor: floorSeconds,
       medians,
@@ -162,11 +166,12 @@ export function computeStripsAxisPolicy(rows, opts = {}) {
   }
 
   const plotBand = Math.max(1, capSeconds - floorSeconds);
-  const offScaleThreshold = capSeconds - plotBand * OFF_SCALE_MARGIN_FRACTION;
-
+  // Round-16 R12-m2: off-scale is now STRICTLY above the cap. Medians close to the cap
+  // are handled by raising the cap in raiseCapForOffScaleAndLegibility above, so nothing
+  // inside the axis window is ever labelled "off scale".
   const rowsOffScale = new Set();
   for (const r of summarised) {
-    if (r.median >= offScaleThreshold) rowsOffScale.add(r.id);
+    if (r.median > capSeconds + 1e-9) rowsOffScale.add(r.id);
   }
 
   // Dot counts feed the "N below" / "N off scale" edge marks. Off-scale rows are handled
@@ -187,7 +192,10 @@ export function computeStripsAxisPolicy(rows, opts = {}) {
     aboveCapDotCounts.set(r.id, above);
   }
 
-  const onScaleAirlineMedians = airlineMedians.filter((m) => m < offScaleThreshold);
+  // Round-16 R12-m2: on-scale is now median <= cap (strict off-scale > cap); the raise
+  // pass above already guarantees no on-scale median sits in the top-of-axis legibility
+  // bracket, so this matches the rowsOffScale set the renderer draws.
+  const onScaleAirlineMedians = airlineMedians.filter((m) => m <= capSeconds + 1e-9);
   let airlineSpanFraction = 0;
   if (onScaleAirlineMedians.length >= 2) {
     const lo = Math.min(...onScaleAirlineMedians);
@@ -301,18 +309,30 @@ function stepDownCap({ startCap, floor, airlineMedians, thirdLargest }) {
   return { finalCap: lastTried, stopReason: 'rungLimit' };
 }
 
-function countOffScaleAt(medians, cap, floor) {
-  const plotBand = Math.max(1, cap - floor);
-  const threshold = cap - plotBand * OFF_SCALE_MARGIN_FRACTION;
+// Round-16 R12-m2: two conditions can force a cap raise. Off-scale is now STRICTLY above
+// cap; a median in the top-of-axis legibility bracket (within 2% of cap while at or below
+// cap) is separate: raising past it keeps the row on scale rather than mislabelling it.
+function countStrictlyAboveCap(medians, cap) {
   let n = 0;
-  for (const m of medians) if (m >= threshold) n += 1;
+  for (const m of medians) if (m > cap + 1e-9) n += 1;
   return n;
 }
 
-function raiseCapToBoundOffScale({ startCap, floor, medians }) {
-  if (countOffScaleAt(medians, startCap, floor) <= MAX_OFF_SCALE_ROWS) {
-    return { finalCap: startCap, stopReason: 'withinCap' };
+function anyMedianWithinLegibilityBracket(medians, cap, floor) {
+  const plotBand = Math.max(1, cap - floor);
+  const lower = cap - plotBand * OFF_SCALE_MARGIN_FRACTION;
+  for (const m of medians) {
+    if (m <= cap + 1e-9 && m >= lower - 1e-9) return true;
   }
+  return false;
+}
+
+function raiseCapForOffScaleAndLegibility({ startCap, floor, medians }) {
+  const shouldRaise = (cap) => (
+    countStrictlyAboveCap(medians, cap) > MAX_OFF_SCALE_ROWS
+    || anyMedianWithinLegibilityBracket(medians, cap, floor)
+  );
+  if (!shouldRaise(startCap)) return { finalCap: startCap, stopReason: 'withinCap' };
   const startMinutes = startCap / 60;
   const higherRungs = STRIPS_NICE_MINUTE_LADDER
     .filter((step) => step > startMinutes + 1e-9)
@@ -320,17 +340,19 @@ function raiseCapToBoundOffScale({ startCap, floor, medians }) {
   let candidate = startCap;
   for (const rung of higherRungs) {
     candidate = rung * 60;
-    if (countOffScaleAt(medians, candidate, floor) <= MAX_OFF_SCALE_ROWS) {
-      return { finalCap: candidate, stopReason: 'withinCap' };
-    }
+    if (!shouldRaise(candidate)) return { finalCap: candidate, stopReason: 'withinCap' };
   }
   return { finalCap: candidate, stopReason: 'ladderEnd' };
 }
 
 function airlineSpanAt(airlineMedians, cap, floor) {
   const plotBand = Math.max(1, cap - floor);
-  const offScaleThreshold = cap - plotBand * OFF_SCALE_MARGIN_FRACTION;
-  const onScale = airlineMedians.filter((m) => m < offScaleThreshold);
+  // Round-16 R12-m2: on-scale is now median <= cap. During step-down we still exclude the
+  // legibility bracket, so a candidate cap that would leave an airline median at the axis
+  // edge does not count as satisfying the span target; the raise pass above will lift the
+  // cap past it if it does anyway.
+  const legibilityLower = cap - plotBand * OFF_SCALE_MARGIN_FRACTION;
+  const onScale = airlineMedians.filter((m) => m < legibilityLower);
   if (onScale.length < 2) return 0;
   return (Math.max(...onScale) - Math.min(...onScale)) / plotBand;
 }
