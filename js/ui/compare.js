@@ -15,7 +15,7 @@ import {
 } from '../engine/strategies/index.js';
 import { seedList } from '../batch.js';
 import { renderStrips } from '../render/charts.js';
-import { computeSharedStripsAxis } from '../render/charts-strips.js';
+import { computeStripsAxisPolicy } from '../render/strips-axis-policy.js';
 import {
   cabinOverridesFromState, passengerOverridesFromState, strategyCabinOverridesFor,
 } from './sim-config.js';
@@ -160,15 +160,24 @@ export function mountCompare({ store, race }) {
 
     stripsWrap.innerHTML = '';
     const width = Math.max(320, Math.min(1080, stripsWrap.clientWidth || 720));
+    // Round-14: at phone widths the two axis notes overprint if drawn inline (round-10
+    // N10-M2). We route both notes into an external caption line under each panel instead.
+    const notesInCaption = width < 520;
 
     if (!grouped) {
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       stripsWrap.appendChild(svg);
       const series = sortedForFinding.map((row) => ({
-        id: row.strategyId, label: row.label, values: row.totalSeconds,
+        id: row.strategyId, label: row.label, family: familyFor(row.strategyId),
+        values: row.totalSeconds,
         highlight: racingIds.includes(row.strategyId),
       }));
-      renderStrips(svg, series, { width, title });
+      const axisPolicy = computeStripsAxisPolicy(series, { preset: state.presetId });
+      const info = renderStrips(svg, series, {
+        width, title, axisPolicy,
+        omitAxisNotes: notesInCaption,
+      });
+      if (notesInCaption) appendCaptionForPanel(stripsWrap, info);
     } else {
       // Two SVGs stacked in the same wrap. The first carries the finding sentence as its title
       // and the textbook rows; the second carries a small group label ("How airlines actually
@@ -180,26 +189,31 @@ export function mountCompare({ store, race }) {
       // pixel distance on both halves. Previously each panel ran its own floor/cap and the
       // airline panel drew at 1.82x the horizontal scale of the textbook panel above it.
       const textbookSeriesData = textbookResults.map((row) => ({
-        id: row.strategyId, label: row.label, values: row.totalSeconds,
+        id: row.strategyId, label: row.label, family: 'textbook', values: row.totalSeconds,
         highlight: racingIds.includes(row.strategyId),
       }));
       const airlineSeriesData = airlineResults.map((row) => ({
-        id: row.strategyId, label: row.label, values: row.totalSeconds,
+        id: row.strategyId, label: row.label, family: 'airline', values: row.totalSeconds,
         highlight: racingIds.includes(row.strategyId),
       }));
-      const sharedAxis = computeSharedStripsAxis([...textbookSeriesData, ...airlineSeriesData]);
+      // Both panels share ONE floor and ONE cap, derived from every median in both panels.
+      // Off-scale rows, dot counts and the airline-span check all fall out of the policy so
+      // the two panels never disagree on what "on-scale" means (round-14).
+      const axisPolicy = computeStripsAxisPolicy(
+        [...textbookSeriesData, ...airlineSeriesData],
+        { preset: state.presetId },
+      );
 
       const textbookSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       stripsWrap.appendChild(textbookSvg);
-      renderStrips(textbookSvg, textbookSeriesData, {
-        width, title,
-        axisMinSeconds: sharedAxis.axisMinSeconds,
-        axisMaxSeconds: sharedAxis.axisMaxSeconds,
+      const textbookInfo = renderStrips(textbookSvg, textbookSeriesData, {
+        width, title, axisPolicy,
+        omitAxisNotes: notesInCaption,
       });
+      if (notesInCaption) appendCaptionForPanel(stripsWrap, textbookInfo);
 
-      // A single caption BETWEEN the two panels (round-08 N8-n8: the previous version
-      // appended it after both panels while the code comment said "between"). The reader
-      // is not left inferring the shared scale from tick labels alone.
+      // A single caption BETWEEN the two panels (round-08 N8-n8). The reader is not left
+      // inferring the shared scale from tick labels alone.
       const sharedCaption = document.createElement('p');
       sharedCaption.className = 'compare-shared-scale';
       sharedCaption.textContent = 'Both panels share this scale.';
@@ -211,11 +225,11 @@ export function mountCompare({ store, race }) {
 
       const airlineSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       stripsWrap.appendChild(airlineSvg);
-      renderStrips(airlineSvg, airlineSeriesData, {
-        width, title: 'How airlines actually board',
-        axisMinSeconds: sharedAxis.axisMinSeconds,
-        axisMaxSeconds: sharedAxis.axisMaxSeconds,
+      const airlineInfo = renderStrips(airlineSvg, airlineSeriesData, {
+        width, title: 'How airlines actually board', axisPolicy,
+        omitAxisNotes: notesInCaption,
       });
+      if (notesInCaption) appendCaptionForPanel(stripsWrap, airlineInfo);
     }
 
     const totalRows = textbookResults.length + airlineResults.length;
@@ -231,6 +245,31 @@ export function mountCompare({ store, race }) {
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/**
+ * Emit the "N below · axis starts at Xm" and "N off scale" notes for a panel as a caption
+ * line under the SVG, so on phone widths (<520 px) they cannot overprint each other. The
+ * caption reads as one sentence with a middle dot when both parts apply.
+ */
+function appendCaptionForPanel(container, info) {
+  if (!info) return;
+  const parts = [];
+  if (Number(info.floorSeconds) > 0) {
+    const minutes = info.floorSeconds / 60;
+    const minutesLabel = minutes < 1 ? String(Math.round(minutes * 10) / 10) : String(Math.round(minutes));
+    if (info.belowFloorTotal > 0) {
+      parts.push(`${info.belowFloorTotal} below · axis starts at ${minutesLabel}m`);
+    } else {
+      parts.push(`axis starts at ${minutesLabel}m`);
+    }
+  }
+  if (info.aboveCapTotal > 0) parts.push(`${info.aboveCapTotal} off scale`);
+  if (parts.length === 0) return;
+  const caption = document.createElement('p');
+  caption.className = 'compare-axis-notes';
+  caption.textContent = parts.join(' · ');
+  container.appendChild(caption);
 }
 
 /**

@@ -74,20 +74,20 @@ test('niceCeiling rounds up to a friendly minute count', () => {
 
 test('renderStrips: one group per series', () => {
   const svg = makeStub('svg');
+  // Round-14: values chosen so no series' median lands above the p90-derived cap and no
+  // seed value falls outside the plot window. The strip axis policy computes floor = 0
+  // (smallest median is small enough to snap the floor down) and cap = 120 s here.
   const series = [
-    { id: 'a', label: 'Alpha', values: [60, 90, 120, 150, 180] },
-    { id: 'b', label: 'Beta', values: [300, 360, 420, 480, 540] },
-    { id: 'c', label: 'Gamma', values: [30, 45, 60, 75, 90] },
+    { id: 'a', label: 'Alpha', values: [10, 20, 30, 40, 50] },
+    { id: 'b', label: 'Beta', values: [60, 70, 80, 90, 100] },
+    { id: 'c', label: 'Gamma', values: [80, 90, 100, 110, 120] },
   ];
   renderStrips(svg, series, { title: 'Test', width: 800 });
-  // Every text node whose x != axis-tick x is either the title or a strategy label.
   const texts = findAll(svg, 'text');
   const labels = texts.filter((t) => t.textContent && ['Alpha', 'Beta', 'Gamma'].includes(t.textContent));
   assert.equal(labels.length, 3);
-  // Each series contributes 5 dots.
   const dots = findAll(svg, 'circle');
   assert.equal(dots.length, 15);
-  // Each series contributes one band rect (plus zero others; time-split rects are elsewhere).
   const rects = findAll(svg, 'rect');
   assert.equal(rects.length, 3);
 });
@@ -135,14 +135,17 @@ test('renderStrips: an empty series renders its label without crashing', () => {
 
 test('renderStrips: highlighted series uses the exit-green ink', () => {
   const svg = makeStub('svg');
+  // Round-14: three series with medians spread so the p90-of-medians cap sits comfortably
+  // above every value, keeping both panels on-scale. The highlighted series then carries
+  // the exit-green ink through its dots.
   renderStrips(svg, [
-    { id: 'a', label: 'A', values: [60, 120] },
-    { id: 'b', label: 'B', values: [60, 120], highlight: true },
+    { id: 'a', label: 'A', values: [50, 60, 70] },
+    { id: 'b', label: 'B', values: [80, 90, 100], highlight: true },
+    { id: 'c', label: 'C', values: [110, 120, 130] },
   ], { width: 600 });
   const dots = findAll(svg, 'circle');
   const colors = new Set(dots.map((d) => d.attrs.fill));
-  // Two colours: default ink and highlight green.
-  assert.ok(colors.size >= 2);
+  assert.ok(colors.size >= 2, `expected at least two dot colours, got ${[...colors].join(',')}`);
 });
 
 // -------- time split --------

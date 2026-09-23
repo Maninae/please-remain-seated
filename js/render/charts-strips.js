@@ -7,8 +7,18 @@
  *     createElementNS/appendChild in tests.
  *   - series: [{ id, label, values: seconds[], highlight? }]
  *   - options.title: the finding sentence drawn top-left.
+ *   - options.axisPolicy: the shared floor/cap/off-scale set from strips-axis-policy.js.
+ *     When present, this panel projects onto the shared axis and off-scale rows draw as
+ *     broken bars in the right gutter with the true value printed (never clamped to the
+ *     cap). When absent (a single-panel deplane compare), a single-panel policy is
+ *     computed on the fly from `series`.
+ *   - options.omitAxisNotes: when true, the panel does not draw the "N below" or "N off
+ *     scale" notes on the axis; the caller renders them in an external caption. Used at
+ *     phone widths so the two notes cannot overprint (round-10 N10-M2).
  *
- * Idempotent: re-rendering into the same host wipes the previous drawing.
+ * Idempotent: re-rendering into the same host wipes the previous drawing. Returns
+ * { floorSeconds, capSeconds, belowFloorTotal, aboveCapTotal } so the caller can build
+ * the external caption for phone widths.
  */
 
 import { THEME } from './theme.js';
@@ -16,11 +26,11 @@ import {
   SVG_NS, ensureSvg, clearElement, setAttrs, readNumericAttr,
   appendCircle, appendLine, appendRect, appendText,
 } from './charts-svg-dom.js';
-import { niceCeiling, niceMinuteStep } from './axis-scale.js';
+import { niceMinuteStep, niceCeiling } from './axis-scale.js';
+import { computeStripsAxisPolicy } from './strips-axis-policy.js';
 
 // Round-05: bumped from 130 -> 200 px so the wider airline labels ("Southwest (2026 assigned
-// seats)") fit inside the label gutter without clipping. Textbook labels are all much shorter
-// so they still sit comfortably in the same gutter.
+// seats)") fit inside the label gutter without clipping.
 const STRIPS_PADDING_LEFT = 200;
 const STRIPS_PADDING_RIGHT = 24;
 const STRIPS_PADDING_TOP = 46;
@@ -42,21 +52,12 @@ export function renderStrips(host, series, options = {}) {
   clearElement(svg);
   const width = options.width || readNumericAttr(svg, 'width') || 720;
   const rows = series.length;
-  // Preview values so we can decide whether to reserve extra top padding for the
-  // "axis starts at Xm" note. The axis floor computation runs again below on the same
-  // values; the arithmetic is cheap.
-  const previewValues = [];
-  for (const s of series) for (const v of s.values || []) if (Number.isFinite(v)) previewValues.push(v);
-  // N7-B2: when the caller passes a shared axis (options.axisMinSeconds / axisMaxSeconds),
-  // both stacked strip panels project seconds onto the same pixel scale. Without the shared
-  // axis, board compare stacked textbook (0m-to-60m) above airlines (12m-to-45m), rendering
-  // the same minutes at a 1.82x scale ratio.
-  const sharedMax = Number.isFinite(options.axisMaxSeconds) ? options.axisMaxSeconds : null;
-  const sharedMin = Number.isFinite(options.axisMinSeconds) ? options.axisMinSeconds : null;
-  const previewMax = previewValues.length ? Math.max(...previewValues) : 60;
-  const previewCap = sharedMax != null ? sharedMax : niceCeiling(previewMax);
-  const previewFloor = sharedMin != null ? sharedMin : computeStripsFloor(previewValues, previewCap);
-  const floorNoteHeight = previewFloor > 0 ? 14 : 0;
+
+  const axisPolicy = options.axisPolicy || computeStripsAxisPolicy(series, { preset: options.preset });
+  const paddedMin = axisPolicy.floorSeconds;
+  const paddedMax = axisPolicy.capSeconds;
+  const rowsOffScale = axisPolicy.rowsOffScale || new Set();
+  const floorNoteHeight = paddedMin > 0 ? 14 : 0;
   const paddingTop = STRIPS_PADDING_TOP + floorNoteHeight;
   const height = paddingTop + rows * STRIPS_ROW_HEIGHT + STRIPS_PADDING_BOTTOM;
   setAttrs(svg, {
@@ -65,27 +66,16 @@ export function renderStrips(host, series, options = {}) {
     'font-family': THEME.fontFamily,
   });
 
-  const paddedMax = previewCap;
-  const paddedMin = previewFloor;
-
   const chartX0 = STRIPS_PADDING_LEFT;
   const chartX1 = width - STRIPS_PADDING_RIGHT;
   const chartWidth = Math.max(1, chartX1 - chartX0);
   const scaleRange = Math.max(1, paddedMax - paddedMin);
-  const projectSeconds = (seconds) => chartX0 + Math.min(1, Math.max(0, (seconds - paddedMin) / scaleRange)) * chartWidth;
-  // N7-m2 / N9-B1: track dots past the cap AND dots below the floor so both truncations
-  // are counted and marked explicitly at the axis edges. Dots that fall outside the window
-  // are NOT drawn (a pileup on the edge would fabricate a cluster that is not in the data);
-  // the reader sees "N off scale" on the right and "N below scale" on the left instead.
-  let offScaleCount = 0;
-  let belowFloorCount = 0;
+  // projectSeconds does NOT clamp: callers who project an off-scale value get an x outside
+  // [chartX0, chartX1] and must handle that themselves (off-scale rows go through
+  // drawOffScaleRow; on-scale dots outside the window are dropped, not clamped).
+  const projectSeconds = (seconds) => chartX0 + ((seconds - paddedMin) / scaleRange) * chartWidth;
 
   if (options.title) {
-    // Round-05: pin the title to the LEFT edge so the finding sentence uses the full chart
-    // width even in a narrow container. Previously the title started at STRIPS_PADDING_LEFT
-    // (aligned to the numeric axis) and a long finding sentence like "easyJet boards fastest
-    // at 24:39; Reverse pyramid still wins on paper at 13:32." got clipped by the SVG viewBox
-    // in the ~500 px main column.
     appendText(svg, {
       x: 4, y: 20,
       'font-size': STRIPS_TITLE_FONT_PX,
@@ -96,10 +86,15 @@ export function renderStrips(host, series, options = {}) {
 
   drawStripsAxis(svg, chartX0, chartX1, paddingTop - 6, paddedMin, paddedMax);
 
+  let belowFloorTotal = 0;
+  let aboveCapTotal = 0;
+
   for (let i = 0; i < series.length; i += 1) {
     const s = series[i];
     const rowY = paddingTop + i * STRIPS_ROW_HEIGHT + STRIPS_ROW_HEIGHT / 2;
 
+    // Row label in the left gutter. Off-scale rows share the same left-label position so
+    // the row still reads as itself; the true value prints in the right gutter.
     appendText(svg, {
       x: chartX0 - 10, y: rowY + STRIPS_LABEL_FONT_PX / 3,
       'font-size': STRIPS_LABEL_FONT_PX,
@@ -116,28 +111,40 @@ export function renderStrips(host, series, options = {}) {
     const p90 = quantile(sorted, 0.9);
     const median = quantile(sorted, 0.5);
 
-    const bandHeight = STRIPS_ROW_HEIGHT * STRIPS_BAND_HEIGHT_FRACTION;
-    const bandY = rowY - bandHeight / 2;
-    const bandStartX = projectSeconds(p10);
-    const bandEndX = projectSeconds(p90);
-    const bandX = bandStartX;
-    const bandW = Math.max(1, bandEndX - bandStartX);
+    if (rowsOffScale.has(s.id)) {
+      drawOffScaleRow(svg, {
+        rowId: s.id,
+        chartX0, chartX1, rowY, median,
+        highlight: !!s.highlight,
+      });
+      continue;
+    }
 
+    // Draw the p10-p90 band, clipped to the plot window. Bandwidth is honest inside; any
+    // portion outside the window is dropped and counted into the edge marks. When either
+    // end is clipped, add a subtle dashed break tick at that end so the reader sees the
+    // truncation instead of reading a hard band edge as the row's real spread
+    // (round-10 N10-m1).
+    const bandLow = Math.max(paddedMin, Math.min(p10, paddedMax));
+    const bandHigh = Math.max(bandLow, Math.min(p90, paddedMax));
+    const bandStartX = projectSeconds(bandLow);
+    const bandEndX = projectSeconds(bandHigh);
+    const bandY = rowY - (STRIPS_ROW_HEIGHT * STRIPS_BAND_HEIGHT_FRACTION) / 2;
+    const bandHeight = STRIPS_ROW_HEIGHT * STRIPS_BAND_HEIGHT_FRACTION;
     appendRect(svg, {
-      x: bandX, y: bandY, width: bandW, height: bandHeight,
+      x: bandStartX, y: bandY, width: Math.max(1, bandEndX - bandStartX),
+      height: bandHeight,
       fill: s.highlight ? THEME.moving : THEME.ink,
       'fill-opacity': 0.10,
     });
+    if (p10 < paddedMin - 1e-9) drawBandBreakTick(svg, bandStartX, rowY, bandHeight);
+    if (p90 > paddedMax + 1e-9) drawBandBreakTick(svg, bandEndX, rowY, bandHeight);
 
     const jitterH = STRIPS_ROW_HEIGHT * STRIPS_JITTER_HEIGHT_FRACTION;
     for (let d = 0; d < values.length; d += 1) {
       const rawValue = values[d];
-      // N9-B1: values outside the [paddedMin, paddedMax] window count into the edge marks
-      // and are NOT drawn. Piling clamped dots on the axis edge fabricates a cluster the
-      // data does not carry; a single "N below scale" glyph is honest, a slab of stacked
-      // dots is not.
-      if (rawValue > paddedMax) { offScaleCount += 1; continue; }
-      if (rawValue < paddedMin) { belowFloorCount += 1; continue; }
+      if (rawValue > paddedMax) { aboveCapTotal += 1; continue; }
+      if (rawValue < paddedMin) { belowFloorTotal += 1; continue; }
       const x = projectSeconds(rawValue);
       const y = rowY + jitterFor(s.id || s.label || '', d) * jitterH;
       appendCircle(svg, {
@@ -147,21 +154,90 @@ export function renderStrips(host, series, options = {}) {
       });
     }
 
+    // Median tick, drawn only when the median is on-scale (off-scale rows return above).
+    // The tick carries data-median-seconds so e2e tests can compare its drawn x against
+    // the row's own median instead of re-deriving the value from the mark's own position
+    // (round-10 N10-M1: the previous test was a tautology).
     const tickH = STRIPS_ROW_HEIGHT * STRIPS_MEDIAN_TICK_HEIGHT_FRACTION;
     const mx = projectSeconds(median);
-    appendLine(svg, {
+    const medianLine = appendLine(svg, {
       x1: mx, x2: mx, y1: rowY - tickH / 2, y2: rowY + tickH / 2,
       stroke: s.highlight ? THEME.moving : THEME.ink,
       'stroke-width': STRIPS_MEDIAN_STROKE,
       'stroke-linecap': 'round',
     });
+    medianLine.setAttribute('data-median-seconds', String(median));
+    medianLine.setAttribute('data-row-id', s.id || '');
   }
-  // N7-m2: strip chart cap treatment. Any dot past paddedMax was silently clamped to the
-  // right edge; the ranked chart three clicks away carries a break mark and an "(off scale)"
-  // label, so this one should too. A single italic note pinned to the axis line, plus a
-  // dashed vertical break tick at the right edge, so the reader sees the truncation.
-  if (offScaleCount > 0) {
-    const axisY = paddingTop - 6;
+
+  if (!options.omitAxisNotes) {
+    drawAxisEdgeNotes(svg, {
+      chartX0, chartX1, axisY: paddingTop - 6, paddedMin,
+      belowFloorTotal, aboveCapTotal,
+    });
+  }
+
+  return {
+    floorSeconds: paddedMin,
+    capSeconds: paddedMax,
+    belowFloorTotal,
+    aboveCapTotal,
+    offScaleRowIds: [...rowsOffScale],
+  };
+}
+
+function drawBandBreakTick(svg, x, rowY, bandHeight) {
+  // A short dashed vertical tick at the band's clipped end, matching the axis-break style.
+  // Kept subtle (2 px stroke width, 2-2 dash) so a row of 14 clipped bands does not read as
+  // a slab of ticks; the reader sees a hint of truncation without being clobbered by it.
+  appendLine(svg, {
+    x1: x, x2: x,
+    y1: rowY - bandHeight / 2 - 1, y2: rowY + bandHeight / 2 + 1,
+    stroke: THEME.ink, 'stroke-width': 0.8, 'stroke-dasharray': '2 2',
+    'stroke-opacity': 0.45,
+  });
+}
+
+function drawOffScaleRow(svg, { rowId, chartX0, chartX1, rowY, median, highlight }) {
+  // Broken bar terminating at the right edge, with a zigzag break mark and the true value
+  // printed in the right gutter. Copied treatment from js/ui/rankings/rankings-chart.js
+  // so the two charts agree on how an off-scale row reads. Never clamp a median to the cap.
+  const bandHeight = STRIPS_ROW_HEIGHT * STRIPS_BAND_HEIGHT_FRACTION;
+  const bandStartX = chartX0;
+  const bandEndX = chartX1;
+  appendRect(svg, {
+    x: bandStartX, y: rowY - bandHeight / 2,
+    width: Math.max(1, bandEndX - bandStartX - 6),
+    height: bandHeight,
+    fill: highlight ? THEME.moving : THEME.ink,
+    'fill-opacity': 0.06,
+  });
+  const zx = bandEndX - 4;
+  const zy = rowY;
+  const doc = svg.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  if (doc) {
+    const path = doc.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', `M ${zx - 4} ${zy - 4} L ${zx} ${zy - 4} L ${zx - 3} ${zy} L ${zx + 1} ${zy} L ${zx - 2} ${zy + 4} L ${zx + 2} ${zy + 4}`);
+    path.setAttribute('stroke', highlight ? THEME.moving : THEME.ink);
+    path.setAttribute('stroke-width', '1');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-opacity', '0.55');
+    svg.appendChild(path);
+  }
+  const label = appendText(svg, {
+    x: chartX1 + 6, y: rowY + STRIPS_LABEL_FONT_PX / 3,
+    'font-size': STRIPS_LABEL_FONT_PX,
+    'text-anchor': 'start',
+    fill: highlight ? THEME.moving : THEME.ink,
+    'font-weight': 600,
+    'font-variant-numeric': 'tabular-nums',
+  }, formatOffScaleClock(median));
+  label.setAttribute('data-row-off-scale', rowId || '');
+  label.setAttribute('data-median-seconds', String(median));
+}
+
+function drawAxisEdgeNotes(svg, { chartX0, chartX1, axisY, paddedMin, belowFloorTotal, aboveCapTotal }) {
+  if (aboveCapTotal > 0) {
     appendLine(svg, {
       x1: chartX1, x2: chartX1, y1: axisY - 5, y2: axisY + 5,
       stroke: THEME.rule, 'stroke-width': 0.8, 'stroke-dasharray': '2 2',
@@ -173,17 +249,12 @@ export function renderStrips(host, series, options = {}) {
       fill: THEME.ink,
       'fill-opacity': 0.5,
       'font-style': 'italic',
-    }, `${offScaleCount} off scale`);
+    }, `${aboveCapTotal} off scale`);
   }
-  // N9-B1: mirror the off-scale mark at the low end. The dashed floor tick is already drawn
-  // by drawStripsAxis when paddedMin > 0; we replace its "axis starts at Xm" label with a
-  // combined "N below · axis starts at Xm" so the reader sees the count and the truncation
-  // in one label. When paddedMin is 0 (no floor), belowFloorCount is 0 by construction.
   if (paddedMin > 0) {
-    const axisY = paddingTop - 6;
     const minuteMin = paddedMin / 60;
-    const floorText = belowFloorCount > 0
-      ? `${belowFloorCount} below · axis starts at ${formatMinutes(minuteMin)}m`
+    const text = belowFloorTotal > 0
+      ? `${belowFloorTotal} below · axis starts at ${formatMinutes(minuteMin)}m`
       : `axis starts at ${formatMinutes(minuteMin)}m`;
     appendText(svg, {
       x: chartX0, y: axisY - 16,
@@ -192,9 +263,8 @@ export function renderStrips(host, series, options = {}) {
       fill: THEME.ink,
       'fill-opacity': 0.5,
       'font-style': 'italic',
-    }, floorText);
+    }, text);
   }
-  return svg;
 }
 
 function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
@@ -221,10 +291,6 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
       'fill-opacity': 0.55,
     }, `${formatMinutes(m)}m`);
   }
-  // N6-m1 / N9-B1: when the axis starts above zero, draw a dashed break tick so the reader
-  // sees the scale is truncated. The italic label ("axis starts at Xm", or "N below · axis
-  // starts at Xm" when there is a below-floor count) is drawn by the caller after the row
-  // loop, so it can include the below-floor count from the same pass.
   if (paddedMin > 0) {
     appendLine(svg, {
       x1: x0, x2: x0, y1: axisY - 5, y2: axisY + 5,
@@ -234,93 +300,13 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
 }
 
 /**
- * Compute a shared axis (floor and cap in seconds) across an arbitrary list of strip-chart
- * series. Used by the "Run it N times" comparison so its two stacked panels (textbook and
- * airline in board mode) project the same minutes onto the same pixel scale.
- *
- * Round-08 N8-M2: cap the axis around the row medians (not around the union max) so the
- * tightest cluster is legible. Round-09 N9-B1: the floor is bounded above by the smallest
- * median (floor = min(p10 of medians, min median) minus a margin), so no median ever gets
- * clamped onto the axis edge. Individual seed values below the floor surface as a
- * "N below scale" mark at the left edge, mirroring the "N off scale" mark on the right.
+ * Legacy wrapper kept for callers that pre-date the new policy module. Delegates to
+ * computeStripsAxisPolicy. Preserved so js/render/charts.js can keep its re-export
+ * surface unchanged for tests and any external consumer.
  */
-export function computeSharedStripsAxis(seriesList) {
-  const allValues = [];
-  const medians = [];
-  if (Array.isArray(seriesList)) {
-    for (const s of seriesList) {
-      if (!s || !Array.isArray(s.values)) continue;
-      const rowValues = [];
-      for (const v of s.values) {
-        if (Number.isFinite(v)) { allValues.push(v); rowValues.push(v); }
-      }
-      if (rowValues.length > 0) {
-        rowValues.sort((a, b) => a - b);
-        medians.push(rowValues[Math.floor(rowValues.length / 2)]);
-      }
-    }
-  }
-  if (allValues.length === 0) return { axisMinSeconds: 0, axisMaxSeconds: 60 };
-  // Cap sits just above the middle of the airline cluster: p75 of the medians pushes the
-  // slowest one or two airline medians and the far-tail front-to-back row off-scale (where
-  // they become an "N off scale" mark on the right edge). Round-08 used p85 * 1.05 with a
-  // floor of p10-of-medians, which fit the whole airline band inside but reserved most of
-  // the frame for the fastest textbook row; the round-09 floor rule (below) has to include
-  // that row, so a tighter cap is what preserves a legible airline span on cabins whose
-  // airline cluster is naturally wide (b738-two-class spans 25-29 min).
-  const rawCap = medians.length >= 6
-    ? percentile(medians, 0.75)
-    : Math.max(...allValues);
-  const axisMaxSeconds = niceCeiling(rawCap);
-  // Floor rule (N9-B1): guarantee the floor sits at or below the smallest MEDIAN so no
-  // median row ever draws as a clamped tick on the axis edge. Take the smaller of
-  // p10-of-medians and the min median as the reference, then let computeStripsFloor apply
-  // the breather and nice-minute snap. When we have only a handful of series, fall back to
-  // the raw-seed floor (which is naturally below every median).
-  let floorSourceValues;
-  if (medians.length >= 6) {
-    const minMedian = Math.min(...medians);
-    const p10OfMedians = percentile(medians, 0.1);
-    floorSourceValues = [Math.min(minMedian, p10OfMedians)];
-  } else {
-    floorSourceValues = allValues;
-  }
-  const axisMinSeconds = computeStripsFloor(floorSourceValues, axisMaxSeconds);
-  return { axisMinSeconds, axisMaxSeconds };
-}
-
-function percentile(sortedOrUnsorted, q) {
-  if (!Array.isArray(sortedOrUnsorted) || sortedOrUnsorted.length === 0) return 0;
-  const sorted = [...sortedOrUnsorted].sort((a, b) => a - b);
-  const pos = (sorted.length - 1) * q;
-  const lo = Math.floor(pos);
-  const hi = Math.ceil(pos);
-  if (lo === hi) return sorted[lo];
-  return sorted[lo] * (1 - (pos - lo)) + sorted[hi] * (pos - lo);
-}
-
-/**
- * Axis floor for the strip chart. Same policy as the rankings chart: earn a floor when the
- * data really sit above zero (at least 2 minutes AND at least 25% of the cap); leave a
- * small breather below the fastest dot; floor to a nice minute step.
- */
-function computeStripsFloor(allValues, paddedMax) {
-  if (!Array.isArray(allValues) || allValues.length === 0) return 0;
-  const minVal = Math.min(...allValues);
-  // Round-08 N8-m3: matches the ranked chart's relaxed floor policy so small-cap panels
-  // (a compare panel that tops out at 5 or 10 minutes) can still show a floor at 0.5 or 1
-  // minute rather than snapping back to 0 and wasting the leading quarter of the frame.
-  if (minVal < 30) return 0;
-  if (minVal < paddedMax * 0.10) return 0;
-  const breather = Math.max(15, (paddedMax - minVal) * 0.05);
-  const raw = Math.max(0, minVal - breather);
-  const minutes = raw / 60;
-  // N9-B1: keep the 1 min step through the 10-20 minute band. The floor now sits at
-  // min(p10 of medians, min median) minus a small breather; a 2-min step used to snap a
-  // 13.2 m raw floor down to 12 m, which widened the plot band and dropped the airline
-  // span to under 25% on the a320 board compare.
-  const step = minutes >= 20 ? 5 : minutes >= 5 ? 1 : minutes >= 1 ? 0.5 : 0.25;
-  return Math.floor(minutes / step) * step * 60;
+export function computeSharedStripsAxis(seriesList, opts = {}) {
+  const policy = computeStripsAxisPolicy(seriesList, opts);
+  return { axisMinSeconds: policy.floorSeconds, axisMaxSeconds: policy.capSeconds };
 }
 
 export function quantile(sortedValues, q) {
@@ -356,4 +342,11 @@ function formatMinutes(m) {
   if (m === 0) return '0';
   if (m < 1) return String(Math.round(m * 10) / 10);
   return String(Math.round(m));
+}
+
+function formatOffScaleClock(seconds) {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  const secs = total - minutes * 60;
+  return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
 }

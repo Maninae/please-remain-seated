@@ -53,8 +53,9 @@ js/render/                    canvas + SVG drawing. Reads state, never mutates i
   cabin-layout-bins.js           the bin-strip geometry pass, section-aware via binIndexOffset
   cabin-view.js                  canvas cabin renderer, any layout and aisle count, section dividers + labels, hitTest(), setHeat()
   charts.js                      barrel: re-exports renderStrips and renderTimeSplit
-  charts-strips.js               strip chart: dots + p10-p90 band + median tick + finding title
+  charts-strips.js               strip chart: dots + p10-p90 band + median tick + finding title; off-scale rows render as broken bars in the right gutter with true value printed
   charts-time-split.js           stacked-bar time-split renderer with a shared scale
+  strips-axis-policy.js          shared floor+cap policy for the compare view (pure module); one floor per compare panel pair, cap driven by p90 of medians with narrowbody step-down toward a 25% airline span
   charts-svg-dom.js              the small SVG DOM shim both charts modules share
   mock-state.js                  synthetic sim state for visual mocks, no engine dependency
 

@@ -136,6 +136,18 @@
   font-style: italic;
 }
 
+/* Round-14 N10-M2: at phone widths (<520 px) the two axis notes cannot both fit on the
+ * strip axis without overprinting. We route them here, one line under each panel, printed
+ * with a middle-dot separator when both parts apply. Small, italic, muted so the caption
+ * reads as chart chrome, not as data. */
+.compare-axis-notes {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-align: left;
+  font-style: italic;
+}
+
 /* Light rule between the textbook and airline groups of strips in board mode. Same paper +
  * rule tokens as the rest of the chart chrome so the split reads as a soft group divider,
  * not a heavy section break. */

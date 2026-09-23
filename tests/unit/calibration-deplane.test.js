@@ -80,7 +80,7 @@ describe('deplaning calibration (A320 default, from door open)', () => {
       const rateMedian = median(rates);
       familyMedians.push({ prefix, rateMedian });
       assert.ok(rateMedian >= 14 && rateMedian <= 27,
-        `seed family "${prefix}-" whole-run throughput median ${rateMedian.toFixed(2)} pax/min is outside 14-27 (Milne & Salari to comfortably above Schultz median 23, Q3 29)`);
+        `seed family "${prefix}-" whole-run throughput median ${rateMedian.toFixed(2)} pax/min is outside 14-27 (Wald, Harmon & Klabjan 2014 lower bound to comfortably above Schultz median 23, Q3 29)`);
     }
     // Belt-and-suspenders: the aggregate median across families should stay in the same range.
     const acrossFamilies = median(familyMedians.map((entry) => entry.rateMedian));

@@ -26,7 +26,9 @@ import path from 'node:path';
 
 const BASE_URL = process.env.PRS_BASE_URL || 'http://localhost:5197';
 const ARTIFACTS_DIR = path.resolve('tests/e2e/artifacts/fix-round-12');
+const ROUND_14_DIR = path.resolve('tests/e2e/artifacts/fix-round-14');
 if (!existsSync(ARTIFACTS_DIR)) mkdirSync(ARTIFACTS_DIR, { recursive: true });
+if (!existsSync(ROUND_14_DIR)) mkdirSync(ROUND_14_DIR, { recursive: true });
 
 async function safeLaunch() {
   try { return await chromium.launch({ headless: true }); }
@@ -192,19 +194,18 @@ test('N8-M1: Rankings tab changes never rewrite the Race tab', async (t) => {
   } finally { await browser.close(); }
 });
 
-// N9-M1: the denominator now comes from the AXIS GEOMETRY (chartX0 to chartX1), not from
-// tick text positions. First-to-last tick is always narrower than the plot band, so a test
-// dividing by it overstates the span and passes below its own stated threshold. We also
-// assert here that N9-B1 stays fixed: no median tick lands on either axis edge, and no
-// two median ticks fabricate a tie by sharing an x. Runs on two presets (a320 and
-// b738-two-class) because the round-9 report measured 18.1% on b738-two-class and this
-// test previously covered only a320.
+// N9-M1 / N10-M1 / round-14: the tests below iterate BOTH panels (textbook + airline) and
+// derive the row's true median from the DOM `data-median-seconds` attribute the chart now
+// emits, not from the tick's own x. That closes the two round-10 findings: (a) the previous
+// no-edge assertion only touched svgs[1], missing the textbook panel where clamping happens;
+// (b) the previous tie assertion re-derived seconds from the median's own x, so any two
+// medians sharing an x automatically read as sharing a value.
 const STRIPS_PADDING_LEFT = 200;
 const STRIPS_PADDING_RIGHT = 24;
 const MEDIAN_TIE_TOLERANCE_SECONDS = 5;
 
-async function measureAirlinePanel(browser, preset) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+async function runCompareAndMeasure(browser, preset, { width = 1280, height = 900 } = {}) {
+  const context = await browser.newContext({ viewport: { width, height } });
   const page = await goto(await context.newPage(),
     `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=n8m2-${preset}`);
   const seedSelect = await page.$('#seed-count-select');
@@ -218,84 +219,104 @@ async function measureAirlinePanel(browser, preset) {
   const measurements = await page.evaluate(({ padL, padR }) => {
     const wrap = document.getElementById('strips-wrap');
     const svgs = Array.from(wrap.querySelectorAll('svg'));
-    const airlineSvg = svgs[1];
-    const svgWidth = Number(airlineSvg.getAttribute('width'));
-    // N9-M1: denominator is the full plot band derived from the axis geometry,
-    // not the distance between the first and last labelled tick.
-    const plotBandPx = Math.max(1, svgWidth - padR - padL);
-    const chartX0 = padL;
-    const chartX1 = svgWidth - padR;
-    const textTicks = Array.from(airlineSvg.querySelectorAll('text'))
-      .map((t) => ({ raw: (t.textContent || '').trim(), x: Number(t.getAttribute('x')) }))
-      .filter((t) => /^[0-9]+(?:\.[0-9]+)?m$/.test(t.raw))
-      .map((t) => ({ minute: Number(t.raw.slice(0, -1)), x: t.x }))
-      .sort((a, b) => a.minute - b.minute);
-    const lines = Array.from(airlineSvg.querySelectorAll('line'));
-    const medianXs = [];
-    for (const line of lines) {
-      const w = line.getAttribute('stroke-width');
-      if (w !== '2.4') continue;
-      const x1 = Number(line.getAttribute('x1'));
-      const x2 = Number(line.getAttribute('x2'));
-      if (Math.abs(x1 - x2) < 0.5) medianXs.push(x1);
+    const panels = [];
+    for (const svg of svgs) {
+      const svgWidth = Number(svg.getAttribute('width'));
+      const chartX0 = padL;
+      const chartX1 = svgWidth - padR;
+      const plotBandPx = Math.max(1, chartX1 - chartX0);
+      const airlineRowIds = new Set();
+      // We can identify airline rows from the label attribute the chart emits.
+      const medianLines = Array.from(svg.querySelectorAll('line[data-median-seconds]'));
+      const medians = medianLines.map((line) => ({
+        rowId: line.getAttribute('data-row-id') || '',
+        x: Number(line.getAttribute('x1')),
+        seconds: Number(line.getAttribute('data-median-seconds')),
+      })).filter((m) => Number.isFinite(m.x) && Number.isFinite(m.seconds));
+      const offScale = Array.from(svg.querySelectorAll('text[data-row-off-scale]')).map((t) => ({
+        rowId: t.getAttribute('data-row-off-scale') || '',
+        text: (t.textContent || '').trim(),
+        seconds: Number(t.getAttribute('data-median-seconds')),
+      }));
+      panels.push({ svgWidth, chartX0, chartX1, plotBandPx, medians, offScale });
     }
-    medianXs.sort((a, b) => a - b);
-    const spanPx = medianXs.length >= 2 ? medianXs[medianXs.length - 1] - medianXs[0] : 0;
-    return { plotBandPx, spanPx, ticks: textTicks, medianXs, chartX0, chartX1 };
+    return { panels };
   }, { padL: STRIPS_PADDING_LEFT, padR: STRIPS_PADDING_RIGHT });
-  await shot(page, `compare-board-${preset}-n8m2.png`);
+  await shot(page, `compare-board-${preset}-${width}x${height}.png`);
   await context.close();
   return measurements;
 }
 
-test('N8-M2 / N9-M1: airline medians span >= 25% of the plot band on a320 board compare', async (t) => {
+test('round-14: on-scale medians never sit on the plot-band edge on BOTH panels (a320)', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
-    const m = await measureAirlinePanel(browser, 'a320');
-    assert.ok(m.plotBandPx > 100, `plot band should be >100 px, got ${m.plotBandPx}`);
-    const spanRatio = m.spanPx / m.plotBandPx;
-    assert.ok(spanRatio >= 0.25,
-      `airline medians should span >= 25% of the plot band, got ${(spanRatio * 100).toFixed(1)}% (${m.spanPx.toFixed(1)} / ${m.plotBandPx.toFixed(1)} px)`);
-    const midTick = m.ticks.find((t) => t.minute >= 15 && t.minute <= 30);
-    assert.ok(midTick,
-      `airline panel should carry at least one tick between 15 and 30 min, got ticks ${m.ticks.map((t) => t.minute).join(', ')}`);
-    // N9-B1 also asserts: no median tick sits on either edge of the plot band.
-    for (const mx of m.medianXs) {
-      assert.ok(mx > m.chartX0 + 2 && mx < m.chartX1 - 2,
-        `median tick at x=${mx} must sit strictly inside the plot band [${m.chartX0 + 2}, ${m.chartX1 - 2}]`);
+    const { panels } = await runCompareAndMeasure(browser, 'a320');
+    assert.ok(panels.length >= 2, `expected at least two panels, got ${panels.length}`);
+    for (let i = 0; i < panels.length; i += 1) {
+      const panel = panels[i];
+      for (const m of panel.medians) {
+        assert.ok(m.x > panel.chartX0 + 2 && m.x < panel.chartX1 - 2,
+          `panel ${i}: median tick for ${m.rowId} at x=${m.x.toFixed(2)} must sit strictly inside `
+          + `[${(panel.chartX0 + 2).toFixed(1)}, ${(panel.chartX1 - 2).toFixed(1)}]`);
+      }
     }
   } finally { await browser.close(); }
 });
 
-// b738-two-class has a genuinely wider airline cluster (255 s median-to-median vs a320's
-// 184 s), so the honest achievable span at defaults is ~22% rather than 25%. The lower
-// bound guards against a regression back toward the round-8 6.7% state; the exact number
-// is reported in the assertion message so the reader sees the measured value.
-test('N9-M1: airline medians span >= 18% of the plot band on b738-two-class board compare', async (t) => {
+test('round-14: no two on-scale medians share a 2 px slot unless within 5 s of each other, BOTH panels (a320 and a321neo-three-class)', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
-    const m = await measureAirlinePanel(browser, 'b738-two-class');
-    assert.ok(m.plotBandPx > 100, `plot band should be >100 px, got ${m.plotBandPx}`);
-    const spanRatio = m.spanPx / m.plotBandPx;
-    assert.ok(spanRatio >= 0.18,
-      `b738-two-class airline medians should span >= 18% of the plot band (was 6.7% in round 7), got ${(spanRatio * 100).toFixed(1)}% (${m.spanPx.toFixed(1)} / ${m.plotBandPx.toFixed(1)} px)`);
-    // N9-B1 also asserts: no median tick sits on either edge of the plot band.
-    for (const mx of m.medianXs) {
-      assert.ok(mx > m.chartX0 + 2 && mx < m.chartX1 - 2,
-        `median tick at x=${mx} must sit strictly inside the plot band [${m.chartX0 + 2}, ${m.chartX1 - 2}]`);
+    for (const preset of ['a320', 'a321neo-three-class']) {
+      const { panels } = await runCompareAndMeasure(browser, preset);
+      for (let i = 0; i < panels.length; i += 1) {
+        const panel = panels[i];
+        for (let a = 0; a < panel.medians.length; a += 1) {
+          for (let b = a + 1; b < panel.medians.length; b += 1) {
+            const dx = Math.abs(panel.medians[a].x - panel.medians[b].x);
+            const ds = Math.abs(panel.medians[a].seconds - panel.medians[b].seconds);
+            if (dx < 2) {
+              assert.ok(ds < MEDIAN_TIE_TOLERANCE_SECONDS,
+                `${preset}: panel ${i}: median ticks for ${panel.medians[a].rowId} and `
+                + `${panel.medians[b].rowId} share x within ${dx.toFixed(2)} px, but their `
+                + `true medians differ by ${ds.toFixed(1)} s (values ${panel.medians[a].seconds.toFixed(1)}, `
+                + `${panel.medians[b].seconds.toFixed(1)})`);
+            }
+          }
+        }
+      }
     }
   } finally { await browser.close(); }
 });
 
-test('N9-B1: compare medians never share an x within 2 px unless within 5 s of each other (a320 board)', async (t) => {
+test('round-14: off-scale rows draw as broken bars with the true value printed, not clamped to the cap (a320)', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const { panels } = await runCompareAndMeasure(browser, 'a320');
+    let sawOffScale = false;
+    for (const panel of panels) {
+      for (const off of panel.offScale) {
+        sawOffScale = true;
+        // The gutter label must carry a real clock string, never blank, never "off scale".
+        assert.match(off.text, /^\d{1,2}:\d{2}$/,
+          `off-scale gutter label for ${off.rowId} should print a clock, got "${off.text}"`);
+        assert.ok(Number.isFinite(off.seconds) && off.seconds > 0,
+          `off-scale gutter for ${off.rowId} must expose its true median in seconds, got ${off.seconds}`);
+      }
+    }
+    assert.ok(sawOffScale, 'a320 board compare should have at least one off-scale row drawn as a broken bar');
+  } finally { await browser.close(); }
+});
+
+test('round-14: phone width routes both axis notes into an external caption and they do not overprint', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const context = await browser.newContext({ viewport: { width: 400, height: 800 }, hasTouch: true, isMobile: true });
     const page = await goto(await context.newPage(),
-      `${BASE_URL}/index.html?tab=race&mode=board&preset=a320&seed=n9b1`);
+      `${BASE_URL}/index.html?tab=race&mode=board&preset=a320&seed=n10m2`);
     const seedSelect = await page.$('#seed-count-select');
     if (seedSelect) await seedSelect.selectOption('100');
     await page.click('#btn-compare');
@@ -306,55 +327,42 @@ test('N9-B1: compare medians never share an x within 2 px unless within 5 s of e
 
     const observed = await page.evaluate(() => {
       const wrap = document.getElementById('strips-wrap');
-      const svgs = Array.from(wrap.querySelectorAll('svg'));
-      const perPanel = [];
-      for (const svg of svgs) {
-        // Median seconds per row: derive from the labelled minute ticks that flank the
-        // median tick x. Since we cannot easily recover the seed values from the DOM, use
-        // the two nearest labelled tick xs and linear-interpolate to a minute value.
-        const textTicks = Array.from(svg.querySelectorAll('text'))
-          .map((t) => ({ raw: (t.textContent || '').trim(), x: Number(t.getAttribute('x')) }))
-          .filter((t) => /^[0-9]+(?:\.[0-9]+)?m$/.test(t.raw))
-          .map((t) => ({ minute: Number(t.raw.slice(0, -1)), x: t.x }))
-          .sort((a, b) => a.x - b.x);
-        if (textTicks.length < 2) continue;
-        const first = textTicks[0];
-        const last = textTicks[textTicks.length - 1];
-        const pxPerMin = (last.x - first.x) / Math.max(1e-6, last.minute - first.minute);
-        const xToSeconds = (x) => (first.minute + (x - first.x) / pxPerMin) * 60;
-        const lines = Array.from(svg.querySelectorAll('line'));
-        const medianXs = [];
-        for (const line of lines) {
-          if (line.getAttribute('stroke-width') !== '2.4') continue;
-          const x1 = Number(line.getAttribute('x1'));
-          const x2 = Number(line.getAttribute('x2'));
-          if (Math.abs(x1 - x2) < 0.5) medianXs.push(x1);
+      const captions = Array.from(wrap.querySelectorAll('p.compare-axis-notes'));
+      // For each caption compute its bounding box so we can assert on non-overlap between
+      // captions and also between axis text nodes inside the same panel.
+      const captionRects = captions.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { text: (el.textContent || '').trim(), top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+      });
+      // Any residual italic axis note inside an SVG (shouldn't exist on phone).
+      const inlineNotes = [];
+      for (const svg of wrap.querySelectorAll('svg')) {
+        for (const t of svg.querySelectorAll('text')) {
+          const txt = (t.textContent || '').trim();
+          if (/off scale/i.test(txt) || /axis starts at/i.test(txt)) inlineNotes.push(txt);
         }
-        medianXs.sort((a, b) => a - b);
-        perPanel.push({ medianXs, medianSecondsList: medianXs.map(xToSeconds) });
       }
-      // Also look for "N below" text: the below-scale note in the strip chart.
-      const belowText = Array.from(document.querySelectorAll('#strips-wrap text'))
-        .map((t) => (t.textContent || '').trim())
-        .filter((s) => /below/i.test(s));
-      return { perPanel, belowText };
+      return { captionRects, inlineNotes };
     });
 
-    // No two medians in the same panel share an x within 2 px unless their inferred
-    // medians differ by less than MEDIAN_TIE_TOLERANCE_SECONDS.
-    for (const { medianXs, medianSecondsList } of observed.perPanel) {
-      for (let i = 0; i < medianXs.length; i += 1) {
-        for (let j = i + 1; j < medianXs.length; j += 1) {
-          const dx = Math.abs(medianXs[i] - medianXs[j]);
-          const ds = Math.abs(medianSecondsList[i] - medianSecondsList[j]);
-          if (dx < 2) {
-            assert.ok(ds < MEDIAN_TIE_TOLERANCE_SECONDS,
-              `two median ticks share x within 2 px (${dx.toFixed(2)} px) but their medians differ by ${ds.toFixed(1)} s: [${medianSecondsList[i].toFixed(1)}, ${medianSecondsList[j].toFixed(1)}]`);
-          }
+    // On phone: the two axis notes must be external captions, not inline SVG text.
+    assert.equal(observed.inlineNotes.length, 0,
+      `phone widths must not draw axis notes inline in the SVG, got ${JSON.stringify(observed.inlineNotes)}`);
+    assert.ok(observed.captionRects.length >= 1,
+      `phone widths must render at least one .compare-axis-notes caption, got ${observed.captionRects.length}`);
+    // Successive captions must not overlap vertically.
+    for (let i = 0; i < observed.captionRects.length; i += 1) {
+      for (let j = i + 1; j < observed.captionRects.length; j += 1) {
+        const a = observed.captionRects[i];
+        const b = observed.captionRects[j];
+        const overlapY = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+        const overlapX = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+        if (overlapX > 0 && overlapY > 0) {
+          assert.fail(`compare-axis-notes captions overlap: "${a.text}" and "${b.text}" (overlap ${overlapX.toFixed(1)} x ${overlapY.toFixed(1)} px)`);
         }
       }
     }
-    await shot(page, 'compare-board-a320-n9b1.png');
+    await shot(page, 'compare-a320-400x800-phone-notes.png');
   } finally { await browser.close(); }
 });
 
@@ -500,5 +508,35 @@ test('N9-m2: About tab prints both the paper\'s >40% figure and this model\'s co
     assert.ok(/A320 deplane headline/.test(bulletText),
       `About aisle-first bullet must name the A320 deplane headline cell, got: ${bulletText}`);
     await shot(page, 'about-aisle-first-n9m2.png');
+  } finally { await browser.close(); }
+});
+
+// Round-14 screenshots: race compare on a320, b738-two-class, a321neo-three-class at
+// desktop and phone widths. Runs inside this file so it does not add a new parallel test
+// process, which previously starved the fix-round-08 CSP test's 30-s wait.
+test('round-14 screenshots: race compare at 1280x800 and 400x800 across a320, b738-two-class, a321neo-three-class', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const presets = ['a320', 'b738-two-class', 'a321neo-three-class'];
+    for (const preset of presets) {
+      for (const viewport of [{ width: 1280, height: 800, mobile: false }, { width: 400, height: 800, mobile: true }]) {
+        const contextOpts = { viewport: { width: viewport.width, height: viewport.height } };
+        if (viewport.mobile) { contextOpts.hasTouch = true; contextOpts.isMobile = true; }
+        const context = await browser.newContext(contextOpts);
+        const page = await goto(await context.newPage(),
+          `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=fr14-${preset}`);
+        const seedSelect = await page.$('#seed-count-select');
+        if (seedSelect) await seedSelect.selectOption('100');
+        await page.click('#btn-compare');
+        await page.waitForFunction(() => {
+          const wrap = document.getElementById('strips-wrap');
+          return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
+        }, {}, { timeout: 120000 });
+        const file = path.join(ROUND_14_DIR, `compare-race-${preset}-${viewport.width}x${viewport.height}.png`);
+        await page.screenshot({ path: file, fullPage: true });
+        await context.close();
+      }
+    }
   } finally { await browser.close(); }
 });

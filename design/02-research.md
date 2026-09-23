@@ -12,7 +12,7 @@ Literature values the simulator's defaults are drawn from. Every number carries 
 - Seat interference movement counts: 1 (no interference), 4 (aisle seat blocked), 5 (middle blocked, window target), up to 9 (worst case); ~5 s per movement, backed by 71 aisle interferences over 360 s in back-to-front runs. (Schultz, "Consideration of Passenger Interactions...", Aerospace 5(4):101, 2018, https://doi.org/10.3390/aerospace5040101)
 - Carry-on mix implied by the Schultz field trials: roughly 20% / 60% / 20% for 0 / 1 / 2 bags. Milne & Kelly assume one 2-bag, one 1-bag, one 0-bag passenger per row-side. (Milne & Kelly, JATM 34:93-100, 2014, https://www.sciencedirect.com/science/article/pii/S0969699713001166)
 - Economy pitch 30-32 in (0.76-0.81 m); at 0.8 m/s about 1 s per row unimpeded.
-- Door arrivals while boarding: exponential inter-arrival, mean 3.7 s (~16 pax/min). (Salari et al. 2020, Schultz baseline)
+- Door arrivals while boarding: exponential inter-arrival, mean 3.7 s (~16 pax/min). (Schultz & Soolaki, "Analytical approach to solve the problem of aircraft passenger boarding during the coronavirus pandemic", arXiv:2007.16021, 2020)
 - Door throughput fell from ~20 pax/min in the 1970s to ~9 pax/min today. (Nyquist & McFadden 2008)
 
 ## Total boarding time by method (~150-180 seats)

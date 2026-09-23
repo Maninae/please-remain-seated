@@ -14,3 +14,4 @@
 
 export { renderStrips, quantile, jitterFor, niceCeiling, computeSharedStripsAxis } from './charts-strips.js';
 export { renderTimeSplit } from './charts-time-split.js';
+export { computeStripsAxisPolicy, isNarrowbodyStripsPreset, STRIPS_NICE_MINUTE_LADDER } from './strips-axis-policy.js';
