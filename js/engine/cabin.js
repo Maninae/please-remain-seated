@@ -1,189 +1,226 @@
 /**
- * Cabin geometry: rows, seat blocks, per-aisle lattices, doors, and the bin index map.
- * Pure functions of config; nothing here reads or mutates sim state.
+ * Cabin geometry: sections, rows, seat blocks, per-aisle lattices, doors, and the bin index map.
+ * Pure functions of config; nothing here reads or mutates sim state. The heavy per-row and
+ * per-bin lookup tables live in cabin-sections.js so this file stays a thin API surface.
  *
- * Layout:
- *   `layout: number[]` gives seat-block widths left to right. Aisles sit between adjacent blocks
- *   (`aisleCount = layout.length - 1`). Every seat column maps to one aisle:
- *   - An outer block steps into its only adjacent aisle.
- *   - A middle block splits in half: the left half uses the left aisle, the right half the right
- *     aisle. An odd middle seat goes left (leftHalfSize = ceil(width / 2)).
- *
- * Seat lettering runs A.. left to right across the whole row (col 0 -> A, col 1 -> B, ...); the
- * global letter is what a passenger reads on their boarding pass in this sim.
+ * Sections (contract: design/05-sections-and-airlines.md)
+ *   `cabin.sections` runs front to back. A cabin built without top-level `sections` becomes ONE
+ *   economy section from the top-level layout / rows / rowPitchMeters / binCapacityPerSeatRow /
+ *   binRowsPerBin fields, so every existing preset keeps its exact geometry. Every section has
+ *   the same `layout.length` (one aisle count for the whole cabin); block widths may differ
+ *   freely per section (a first-class 2-2 next to an economy 3-3 both have layout.length 2, so
+ *   they can share the same 1-aisle lattice).
  *
  * Aisle lattice (one per aisle, all identical shape):
- *   [0 .. frontGalleyCells - 1]                         front galley (cell 0 is the forward door)
- *   [frontGalleyCells .. + rows*aisleCellsPerRow - 1]   one pair of cells per row, row 1 nearest the door
- *   [... + rearGalleyCells - 1]                         rear galley (only when rearDoor is on)
- *   Cell indices are per-aisle; `state.aisles[aisleIndex]` is one Int32Array of that length per aisle.
- *   The forward door is a shared server across every aisle (a widebody's aisles merge in the
- *   galley); doorServiceSeconds lives in config.js and is enforced by the sims.
+ *   [0 .. frontGalleyCells - 1]                                 front galley (cell 0 is the forward door)
+ *   [frontGalleyCells .. + Σ(section.rows * section.aisleCellsPerRow) - 1]
+ *                                                               per-section row cells, front to back
+ *   [... + rearGalleyCells - 1]                                 rear galley (only when rearDoor is on)
+ *   A row owns max(1, round(section.rowPitchMeters / aisleCellMeters)) contiguous cells; two for
+ *   economy 31 in and first 37 in, three for a 44 in business lie-flat. The either-cell rule from
+ *   03 becomes "any cell of the row's run".
  *
  * Bins:
- *   One group per seat block, `ceil(rows / binRowsPerBin)` bins per block, capacity per bin
- *   `round(binCapacityPerSeatRow * blockWidth * binRowsPerBin)` bags. Bin indices are global,
- *   contiguous per block (block 0 owns bins [0, binsPerBlock), block 1 owns [binsPerBlock,
- *   2*binsPerBlock), and so on).
+ *   Per (section, block), `section.binRowsPerBin` rows per bin; capacity is
+ *   `round(section.binCapacityPerSeatRow * blockWidth * rowsInThisBin)`. A bin never spans two
+ *   sections. Global bin indices are contiguous per block within a section (section-major,
+ *   block-minor).
  *
  * Exports:
- *   createCabin(overrides)                              -> cabin
- *   seatColumnInfo(cabin, col)                          -> { blockIndex, aisleIndex, side, seatDepth, letter }
- *   colAt(cabin, blockIndex, depth, aisleSide)          -> col   (inverse of the block/depth/side of seatColumnInfo)
- *   rowToCell(cabin, row)                               -> per-aisle cell index a passenger steps into from that row
- *   cellToRow(cabin, cell)                              -> row for a row cell, or null in a galley
- *   nearestDoorCell(cabin, row)                         -> per-aisle cell index of the door nearest that row (front on ties)
- *   pickExitDoorCell(cabin, cell)                       -> per-aisle cell index of the door nearest that cell (front on ties)
- *   binIndex(cabin, row, blockIndex)                    -> global bin index that serves that row in that block
- *   binFirstRow(cabin, index)                           -> first row a bin serves
- *   binBlock(cabin, index)                              -> block index a bin belongs to
- *   binCapacityForBlock(cabin, blockIndex)              -> per-bin capacity in bags for that block
- *   cellMeters(cabin, cell)                             -> metres from the front door to a cell centre
+ *   createCabin(overrides)                                       -> cabin
+ *   seatColumnInfo(cabin, row, col) / seatColumnInfo(cabin, col) -> { blockIndex, aisleIndex, side, seatDepth, letter }
+ *   colAt(cabin, row, blockIndex, depth, aisleSide) / colAt(cabin, blockIndex, depth, aisleSide)
+ *   rowSection(cabin, row)                                       -> section index the row sits in
+ *   rowLayout(cabin, row)                                        -> section's layout array for that row
+ *   seatsInRow(cabin, row)                                       -> number of seats in the row
+ *   rowToCell(cabin, row)                                        -> first per-aisle cell of the row's run
+ *   rowCellCount(cabin, row)                                     -> number of cells in the row's run
+ *   cellToRow(cabin, cell)                                       -> row for a row cell, or null in a galley
+ *   nearestDoorCell(cabin, row)                                  -> per-aisle cell index of the door nearest that row
+ *   pickExitDoorCell(cabin, cell)                                -> per-aisle cell index of the door nearest that cell
+ *   binIndex(cabin, row, blockIndex)                             -> global bin index that serves that row in that block
+ *   binFirstRow(cabin, index)                                    -> first cabin row a bin serves
+ *   binBlock(cabin, index)                                       -> block index a bin belongs to
+ *   binSection(cabin, index)                                     -> section index a bin belongs to
+ *   binCapacityForBlock(cabin, blockIndex, sectionIndex?)        -> per-bin capacity in bags for that block
+ *   cellMeters(cabin, cell)                                      -> metres from the front door to a cell centre
  */
 
 import { CABIN_DEFAULTS } from './config.js';
+import {
+  buildSections, buildRowIndex, buildBinIndex, computeColumnInfo,
+} from './cabin-sections.js';
 
 export function createCabin(overrides = {}) {
   const config = { ...CABIN_DEFAULTS, ...overrides };
-  if (!Array.isArray(config.layout) || config.layout.length < 2) {
-    throw new Error(
-      `cabin layout must be an array of at least two seat-block widths, got ${JSON.stringify(config.layout)}`,
-    );
-  }
-  for (const width of config.layout) {
-    if (!Number.isInteger(width) || width < 1) {
-      throw new Error(`seat-block widths must be positive integers, got ${JSON.stringify(config.layout)}`);
+  if (!Array.isArray(config.sections) || config.sections.length === 0) {
+    // Validate the top-level layout only when there are no sections; a sectioned config carries
+    // its own per-section layouts and the top-level field is decorative.
+    if (!Array.isArray(config.layout) || config.layout.length < 2) {
+      throw new Error(
+        `cabin layout must be an array of at least two seat-block widths, got ${JSON.stringify(config.layout)}`,
+      );
+    }
+    for (const width of config.layout) {
+      if (!Number.isInteger(width) || width < 1) {
+        throw new Error(`seat-block widths must be positive integers, got ${JSON.stringify(config.layout)}`);
+      }
     }
   }
-  const layout = config.layout.slice();
-  const aisleCount = layout.length - 1;
 
-  // Precompute the leftmost global col of each block for the (col <-> block, depth, side) maps.
-  const blockStartCol = new Array(layout.length);
-  let seatsPerRow = 0;
-  for (let index = 0; index < layout.length; index += 1) {
-    blockStartCol[index] = seatsPerRow;
-    seatsPerRow += layout[index];
-  }
-  const totalSeats = config.rows * seatsPerRow;
-
-  // Cache one column-info record per column so hot loops just do an array lookup.
-  const columnInfo = new Array(seatsPerRow);
-  for (let col = 0; col < seatsPerRow; col += 1) {
-    columnInfo[col] = computeColumnInfo(layout, blockStartCol, aisleCount, col);
-  }
-
-  // One bin group per block, uniform binsPerBlock; capacities scale with the block's width.
-  const binsPerBlock = Math.ceil(config.rows / config.binRowsPerBin);
-  const totalBins = binsPerBlock * layout.length;
-  const binCapacities = new Int32Array(totalBins);
-  for (let bin = 0; bin < totalBins; bin += 1) {
-    const block = Math.floor(bin / binsPerBlock);
-    binCapacities[bin] = Math.round(config.binCapacityPerSeatRow * layout[block] * config.binRowsPerBin);
-  }
-
-  // Every aisle has the same cell count; totalCells is aisleCount * cellsPerAisle.
-  const rowCells = config.rows * config.aisleCellsPerRow;
-  const cellsPerAisle = config.frontGalleyCells + rowCells + (config.rearDoor ? config.rearGalleyCells : 0);
-  const totalCells = cellsPerAisle * aisleCount;
-
-  return {
+  const sections = buildSections(config, config.aisleCellMeters, CABIN_DEFAULTS);
+  const aisleCount = sections[0].layout.length - 1;
+  const totalRows = sections.reduce((sum, section) => sum + section.rows, 0);
+  const skeleton = {
     ...config,
-    layout,
-    blockStartCol,
-    columnInfo,
+    frontGalleyCells: config.frontGalleyCells,
+    rearGalleyCells: config.rearGalleyCells,
+    rearDoor: !!config.rearDoor,
+    aisleCellMeters: config.aisleCellMeters,
+    rows: totalRows,
     aisleCount,
+  };
+  const rowIndex = buildRowIndex(sections, skeleton);
+  const binIndexInfo = buildBinIndex(sections);
+
+  // Single-section cabins retain today's top-level shape for the renderer and the tests that
+  // read cabin.layout / cabin.aisleCellsPerRow / cabin.binsPerBlock directly. For sectioned
+  // cabins we expose the economy section's values as the "default" here so those same fields
+  // stay sane; the correct row-aware answers live on `sections` and the per-row lookup helpers.
+  const defaultSection = pickDefaultSection(sections);
+  // `seatsPerRow` doubles as the stride for row-major seat keys in Map/Set lookups. On a
+  // single-section cabin the default section is the only section, so this matches sum(layout)
+  // exactly and every existing test still reads the same number. On a sectioned cabin we take
+  // the max across sections, since the default's width may be smaller than another section's
+  // (a business 2-2 default alongside an economy 3-3 would otherwise let two seats collide on
+  // the same integer key).
+  const seatsPerRow = Math.max(...sections.map((section) => section.seatsPerRow));
+  const totalSeats = countTotalSeats(sections);
+
+  const cellsPerAisle = rowIndex.cellsPerAisle;
+  const cabin = {
+    ...skeleton,
+    sections,
+    isSectioned: sections.length > 1,
+    layout: defaultSection.layout,
+    binsPerBlock: defaultSection.binsPerBlock,
+    binRowsPerBin: defaultSection.binRowsPerBin,
+    binCapacityPerSeatRow: defaultSection.binCapacityPerSeatRow,
+    rowPitchMeters: defaultSection.rowPitchMeters,
+    aisleCellsPerRow: defaultSection.aisleCellsPerRow,
+    blockStartCol: defaultSection.blockStartCol,
+    columnInfo: defaultSection.columnInfo,
     seatsPerRow,
     totalSeats,
-    binsPerBlock,
-    totalBins,
-    binCapacities,
+    binsPerBlockDefault: defaultSection.binsPerBlock,
+    // Row-aware and per-bin tables live inside `sectionsIndex`; the helpers below are the
+    // supported access path so sims never poke through to raw arrays.
+    sectionsIndex: {
+      rowIndex,
+      binIndexInfo,
+    },
+    binCapacities: binIndexInfo.binCapacities,
+    totalBins: binIndexInfo.totalBins,
     cellsPerAisle,
-    totalCells,
+    totalCells: cellsPerAisle * aisleCount,
     frontDoorCell: 0,
     rearDoorCell: config.rearDoor ? cellsPerAisle - 1 : null,
+    premiumRows: normalisePremiumRows(config.premiumRows),
   };
+  return cabin;
 }
 
 /**
- * Which block, which aisle, which side of that aisle, how deep from it, and the seat letter.
- * See the module docstring for the block-split rules.
+ * Prefer the economy section as the source of the top-level compatibility fields (layout,
+ * aisleCellsPerRow, binsPerBlock, ...). The old `seatColumnInfo(cabin, col)` signature and the
+ * renderer both read those fields, and design/05 pins "the old (cabin, col) signature stays
+ * valid ... for the economy section otherwise" as the sectioned-cabin fallback.
  */
-export function seatColumnInfo(cabin, col) {
-  return cabin.columnInfo[col];
+function pickDefaultSection(sections) {
+  for (const section of sections) if (section.cabinClass === 'economy') return section;
+  return sections[sections.length - 1];
 }
 
-function computeColumnInfo(layout, blockStartCol, aisleCount, col) {
-  // Find the block this col falls into.
-  let blockIndex = 0;
-  for (; blockIndex < layout.length; blockIndex += 1) {
-    if (col < blockStartCol[blockIndex] + layout[blockIndex]) break;
+function countTotalSeats(sections) {
+  let total = 0;
+  for (const section of sections) total += section.rows * section.seatsPerRow;
+  return total;
+}
+
+function normalisePremiumRows(input) {
+  if (!Array.isArray(input) || input.length === 0) return null;
+  const set = new Set();
+  for (const row of input) if (Number.isInteger(row) && row > 0) set.add(row);
+  return set;
+}
+
+// -------------------- row-aware lookups --------------------
+
+export function rowSection(cabin, row) {
+  return cabin.sectionsIndex.rowIndex.sectionByRow[row];
+}
+
+export function rowLayout(cabin, row) {
+  return cabin.sectionsIndex.rowIndex.rowLayoutByRow[row];
+}
+
+export function seatsInRow(cabin, row) {
+  return cabin.sectionsIndex.rowIndex.seatsInRowByRow[row];
+}
+
+/**
+ * Row-aware column info. Both signatures are supported:
+ *   seatColumnInfo(cabin, row, col)  is the canonical form. Sectioned cabins always use it,
+ *                                    since two sections with different block widths would
+ *                                    return different geometry for the same col.
+ *   seatColumnInfo(cabin, col)       is the backward-compatible form. Single-section cabins
+ *                                    keep their existing behaviour; sectioned cabins resolve
+ *                                    against the economy section, matching the design contract.
+ */
+export function seatColumnInfo(cabin, arg1, arg2) {
+  if (arg2 === undefined) return cabin.columnInfo[arg1];
+  return cabin.sectionsIndex.rowIndex.columnInfoByRow[arg1][arg2];
+}
+
+/**
+ * Inverse of the (blockIndex, seatDepth, side) triple.
+ *   colAt(cabin, row, blockIndex, depth, aisleSide)  is the canonical row-aware form.
+ *   colAt(cabin, blockIndex, depth, aisleSide)       resolves against the economy section for
+ *                                                    the same backward-compat reason as above.
+ */
+export function colAt(cabin, arg1, arg2, arg3, arg4) {
+  if (arg4 === undefined) {
+    // (cabin, blockIndex, depth, aisleSide): use the economy-section layout.
+    return columnFor(cabin.layout, cabin.blockStartCol, arg1, arg2, arg3);
   }
+  const layout = rowLayout(cabin, arg1);
+  const blockStartCol = cabin.sections[rowSection(cabin, arg1)].blockStartCol;
+  return columnFor(layout, blockStartCol, arg2, arg3, arg4);
+}
+
+function columnFor(layout, blockStartCol, blockIndex, depth, aisleSide) {
+  const start = blockStartCol[blockIndex];
   const width = layout[blockIndex];
-  const blockCol = col - blockStartCol[blockIndex];
-  const letter = String.fromCharCode(65 + col);
-  const isOuterLeft = blockIndex === 0;
-  const isOuterRight = blockIndex === layout.length - 1;
-  let aisleIndex;
-  let side;
-  let seatDepth;
-  if (isOuterLeft && !isOuterRight) {
-    // Aisle 0 is to the right; col nearest that aisle is depth 0.
-    aisleIndex = 0;
-    side = 0;
-    seatDepth = width - 1 - blockCol;
-  } else if (isOuterRight && !isOuterLeft) {
-    // The last aisle is to the left; col nearest that aisle is depth 0.
-    aisleIndex = aisleCount - 1;
-    side = 1;
-    seatDepth = blockCol;
-  } else if (isOuterLeft && isOuterRight) {
-    // Degenerate single-block layout (no aisle). createCabin already refuses this.
-    aisleIndex = -1;
-    side = 0;
-    seatDepth = 0;
-  } else {
-    // Middle block: split in half, odd middle seat goes left.
-    const leftHalfSize = Math.ceil(width / 2);
-    if (blockCol < leftHalfSize) {
-      // Left half uses the left aisle; the aisle sits to the passenger's left.
-      aisleIndex = blockIndex - 1;
-      side = 1;
-      seatDepth = blockCol;
-    } else {
-      // Right half uses the right aisle; the aisle sits to the passenger's right.
-      aisleIndex = blockIndex;
-      side = 0;
-      seatDepth = width - 1 - blockCol;
-    }
-  }
-  return { blockIndex, aisleIndex, side, seatDepth, letter };
-}
-
-/**
- * Inverse of the (blockIndex, seatDepth, side) triple: given a block, how many seats we are from
- * the aisle, and which side of the aisle we sit on, return the global column.
- *   aisleSide 0 (aisle to my right):  col = blockStart + width - 1 - depth
- *   aisleSide 1 (aisle to my left):   col = blockStart + depth
- */
-export function colAt(cabin, blockIndex, depth, aisleSide) {
-  const start = cabin.blockStartCol[blockIndex];
-  const width = cabin.layout[blockIndex];
   if (aisleSide === 0) return start + width - 1 - depth;
   return start + depth;
 }
 
 /** Per-aisle cell index of the forward-most cell of a row (where a passenger steps into the aisle). */
 export function rowToCell(cabin, row) {
-  return cabin.frontGalleyCells + (row - 1) * cabin.aisleCellsPerRow;
+  return cabin.sectionsIndex.rowIndex.rowFirstCellByRow[row];
 }
 
-/** Row a per-aisle cell sits beside, or null in a galley. */
+/** Number of contiguous aisle cells the row owns (2 for economy, 3 for a 44 in lie-flat). */
+export function rowCellCount(cabin, row) {
+  return cabin.sectionsIndex.rowIndex.rowCellCountByRow[row];
+}
+
+/** Row a per-aisle cell sits beside, or null in a galley cell. */
 export function cellToRow(cabin, cell) {
-  const offset = cell - cabin.frontGalleyCells;
-  if (offset < 0) return null;
-  const row = Math.floor(offset / cabin.aisleCellsPerRow) + 1;
-  return row > cabin.rows ? null : row;
+  const table = cabin.sectionsIndex.rowIndex.cellToRowByCell;
+  if (cell < 0 || cell >= table.length) return null;
+  const row = table[cell];
+  return row < 0 ? null : row;
 }
 
 /** Per-aisle cell index of the door nearest this row: front door on ties, or the only door if no rear. */
@@ -195,12 +232,8 @@ export function nearestDoorCell(cabin, row) {
 
 /**
  * Per-aisle cell index of the door nearest a given aisle cell: front door on ties, or the only
- * door if no rear. Used by the deplaning sim to (re)decide a passenger's exit door at the moment
- * they start walking to it, so a passenger whose bag ended up several rows away from their seat
- * routes to whichever door is closer from where they actually stand (not from the seat they
- * left behind). Without this a rear-door passenger whose bag overflowed forward would walk to
- * the bag, then pay counterflow all the way back to the rear door instead of using the front
- * door that is now nearer.
+ * door if no rear. See the deplaning-sim docstring for why this is called at the moment a
+ * passenger starts WALKING for exit, not from the seat row.
  */
 export function pickExitDoorCell(cabin, cell) {
   if (!cabin.rearDoor) return cabin.frontDoorCell;
@@ -209,27 +242,52 @@ export function pickExitDoorCell(cabin, cell) {
   return toRear < toFront ? cabin.rearDoorCell : cabin.frontDoorCell;
 }
 
+// -------------------- bin index --------------------
+
 /** Global bin index that serves this row in this block. */
 export function binIndex(cabin, row, blockIndex) {
-  return blockIndex * cabin.binsPerBlock + Math.floor((row - 1) / cabin.binRowsPerBin);
+  const section = cabin.sections[rowSection(cabin, row)];
+  const rowInSection = row - section.firstRow;
+  return section.binOffset + blockIndex * section.binsPerBlock
+    + Math.floor(rowInSection / section.binRowsPerBin);
 }
 
-/** First row this bin serves. Its full range is [firstRow, firstRow + binRowsPerBin - 1], clipped to the cabin. */
+/** First cabin row this bin serves (continuous numbering, 1-based). */
 export function binFirstRow(cabin, index) {
-  return (index % cabin.binsPerBlock) * cabin.binRowsPerBin + 1;
+  return cabin.sectionsIndex.binIndexInfo.binFirstRow[index];
 }
 
 /** Which block a bin belongs to. */
 export function binBlock(cabin, index) {
-  return Math.floor(index / cabin.binsPerBlock);
+  return cabin.sectionsIndex.binIndexInfo.binBlock[index];
 }
 
-/** Per-bin capacity in bags for the given block: round(binCapacityPerSeatRow * width * binRowsPerBin). */
-export function binCapacityForBlock(cabin, blockIndex) {
-  return Math.round(cabin.binCapacityPerSeatRow * cabin.layout[blockIndex] * cabin.binRowsPerBin);
+/** Which section a bin belongs to. Added for sectioned cabins so a class-aware overflow search or renderer can tell where a bin lives. */
+export function binSection(cabin, index) {
+  return cabin.sectionsIndex.binIndexInfo.binSection[index];
+}
+
+/**
+ * Per-bin capacity in bags for the given block. In a sectioned cabin the answer depends on the
+ * section too (block widths and bin era differ), so the section may be passed explicitly. When
+ * omitted we return the default section's capacity for that block, which matches the pre-sections
+ * behaviour on a single-section cabin.
+ */
+export function binCapacityForBlock(cabin, blockIndex, sectionIndex) {
+  const section = cabin.sections[sectionIndex ?? pickDefaultSectionIndex(cabin)];
+  return Math.round(section.binCapacityPerSeatRow * section.layout[blockIndex] * section.binRowsPerBin);
+}
+
+function pickDefaultSectionIndex(cabin) {
+  for (const section of cabin.sections) if (section.cabinClass === 'economy') return section.index;
+  return cabin.sections.length - 1;
 }
 
 /** Metres from the forward door to the middle of a per-aisle cell (for rendering and walk maths). */
 export function cellMeters(cabin, cell) {
   return (cell + 0.5) * cabin.aisleCellMeters;
 }
+
+// Re-export the raw column-info builder so tools that want to compute column info for an ad-hoc
+// layout without a full cabin can call it directly.
+export { computeColumnInfo };

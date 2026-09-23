@@ -23,6 +23,16 @@ import { rowToCell } from '../../js/engine/cabin.js';
 const P = DeplanePhase;
 
 function overridesFromPreset(preset) {
+  if (preset.sections) {
+    // Sectioned presets carry their layout inside each section. Copy the top-level knobs the
+    // section entries fall back to (binCapacityPerSeatRow, premiumRows) and hand the sections
+    // through verbatim.
+    return {
+      sections: preset.sections,
+      binCapacityPerSeatRow: preset.binCapacityPerSeatRow,
+      premiumRows: preset.premiumRows,
+    };
+  }
   return {
     layout: preset.layout.slice(),
     rows: preset.rows,

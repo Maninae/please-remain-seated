@@ -194,16 +194,23 @@ function markDoorArrival(passenger, t) {
 }
 
 function isInTargetPair(passenger) {
-  const pair = passenger.walkTargetPair;
-  if (pair) return passenger.aisleCell === pair[0] || passenger.aisleCell === pair[1];
+  const run = passenger.walkTargetPair;
+  if (run) return runContainsCell(run, passenger.aisleCell);
   return passenger.aisleCell === passenger.walkTargetCell;
+}
+
+function runContainsCell(run, cell) {
+  // Runs are short (2 or 3 cells), so a plain scan beats set overhead. Never null here: the
+  // sim only sets walkTargetPair when we route to a bag access row.
+  for (let index = 0; index < run.length; index += 1) if (run[index] === cell) return true;
+  return false;
 }
 
 function arrivalCheck(passenger) {
   if (passenger.walkPurpose !== 'bag') return;
-  const pair = passenger.walkTargetPair;
-  const arrived = pair
-    ? (passenger.aisleCell === pair[0] || passenger.aisleCell === pair[1])
+  const run = passenger.walkTargetPair;
+  const arrived = run
+    ? runContainsCell(run, passenger.aisleCell)
     : passenger.aisleCell === passenger.walkTargetCell;
   if (!arrived) return;
   passenger.phase = P.RETRIEVING;

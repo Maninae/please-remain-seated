@@ -47,6 +47,17 @@
  *     patient: boolean,        (patient passengers stay SEATED after prep expires until the
  *                               door has opened AND at least one aisle cell of their row-pair
  *                               is empty. See PASSENGER_DEFAULTS.patientFraction.),
+ *     cabinClass: 'first' | 'business' | 'premium' | 'economy',   (inherited from the seat's
+ *                               section; see design/05-sections-and-airlines.md.),
+ *     fare: 'first' | 'business' | 'premium' | 'main' | 'basic',  (first/business/premium
+ *                               sections carry their class as the fare; economy seats flagged
+ *                               premium by section.premium or by the preset's premiumRows list
+ *                               are 'premium'; the rest of economy splits basic vs main by
+ *                               basicFareFraction. Group members share the leader's fare.),
+ *     status: 'none' | 'silver' | 'gold' | 'top',                 (frequent-flier tier drawn
+ *                               against statusFractions. Group members share the leader's.),
+ *     preboard: boolean,       (families with small children, wheelchair assistance; boards
+ *                               first regardless of strategy, group-mates go with them.),
  *     doorWaitStartT: number|null,  (deplane only: state.t when the passenger first arrived at
  *                               their exit door cell, cleared on admission. The fair-door pass
  *                               ranks candidates by this so the same shared front-door server

@@ -1,15 +1,19 @@
 /**
  * Preset cabin geometries for the strategies to run against.
  *
- * Each entry is `{ id, label, layout, rows, binCapacityPerSeatRow, rowPitchMeters, note }`. Layouts
- * are seat-block widths left to right; see cabin.js for the block/aisle rules. Row counts and
- * layouts are the standard one-class configurations for the aircraft; sources noted per entry.
- * Load factor, rear-door use, and bin era stay independent toggles: the UI overlays those on top.
+ * Each entry is either single-class ({ id, label, layout, rows, binCapacityPerSeatRow,
+ * rowPitchMeters, note }) or multi-class ({ id, label, sections: [...], note }); see
+ * cabin-presets-sections.js for the sectioned entries and design/05-sections-and-airlines.md
+ * for the section contract. Row counts and layouts are the standard configurations for the
+ * aircraft; sources noted per entry. Load factor, rear-door use, and bin era stay independent
+ * toggles: the UI overlays those on top.
  *
  * `DEFAULT_CABIN_PRESET_ID` picks the entry the page starts on ('a320'). Every id is unique.
  */
 
-export const CABIN_PRESETS = Object.freeze([
+import { SECTION_CABIN_PRESETS } from './cabin-presets-sections.js';
+
+const SINGLE_CLASS_CABIN_PRESETS = Object.freeze([
   Object.freeze({
     id: 'crj700',
     label: 'CRJ-700',
@@ -17,7 +21,7 @@ export const CABIN_PRESETS = Object.freeze([
     rows: 17,
     binCapacityPerSeatRow: 0.5,
     rowPitchMeters: 0.79,
-    note: 'Bombardier regional jet, 2-2 layout, ~66-70 economy seats; shelf-style bins fit few roller bags (regional 0.5).',
+    note: 'A small regional jet, 2-2 seating, about 66 seats. The shelf-style bins fit only a couple of roller bags per row.',
   }),
   Object.freeze({
     id: 'e175',
@@ -26,7 +30,7 @@ export const CABIN_PRESETS = Object.freeze([
     rows: 19,
     binCapacityPerSeatRow: 0.5,
     rowPitchMeters: 0.79,
-    note: 'Embraer E175 regional jet, 2-2 layout, ~76 seats one-class; regional bins.',
+    note: 'Another regional jet, 2-2 seating, about 76 seats. Small overhead bins, like the CRJ.',
   }),
   Object.freeze({
     id: 'b717',
@@ -35,25 +39,25 @@ export const CABIN_PRESETS = Object.freeze([
     rows: 26,
     binCapacityPerSeatRow: 0.67,
     rowPitchMeters: 0.79,
-    note: 'MD-95 lineage, 2-3 layout; ~117 economy seats in Delta configuration (legacy bins).',
+    note: 'Older short-hop jet in a lopsided 2-3, about 117 seats. Uses old-style bins.',
   }),
   Object.freeze({
     id: 'a320',
-    label: 'A320 / 737-800',
+    label: 'A320 / 737',
     layout: Object.freeze([3, 3]),
     rows: 30,
     binCapacityPerSeatRow: 1.0,
     rowPitchMeters: 0.79,
-    note: 'Standard narrowbody, 180 seats in 3-3 at 31 in pitch (Airspace XL / Space Bin era).',
+    note: 'The typical single-aisle jet, 3-3 seating, 180 seats. What most domestic flights use.',
   }),
   Object.freeze({
     id: 'b738-hd',
-    label: '737-800 high-density',
+    label: '737 high-density',
     layout: Object.freeze([3, 3]),
     rows: 33,
     binCapacityPerSeatRow: 0.67,
     rowPitchMeters: 0.74,
-    note: '189-seat Ryanair-style config; legacy bins (~4 bags per 3-wide bin over 2 rows) and 29 in pitch.',
+    note: 'A 737 crammed to 189 seats, budget-airline style. Old-style bins, less legroom.',
   }),
   Object.freeze({
     id: 'a321neo',
@@ -62,7 +66,7 @@ export const CABIN_PRESETS = Object.freeze([
     rows: 37,
     binCapacityPerSeatRow: 1.0,
     rowPitchMeters: 0.79,
-    note: 'Stretched A320 in 3-3, 220-235 seats one-class; Airspace XL bins.',
+    note: 'A stretched A320 with 220 to 235 seats. Roomy new-style bins.',
   }),
   Object.freeze({
     id: 'b767',
@@ -71,7 +75,7 @@ export const CABIN_PRESETS = Object.freeze([
     rows: 28,
     binCapacityPerSeatRow: 1.0,
     rowPitchMeters: 0.81,
-    note: 'Twin-aisle widebody in 2-3-2, ~196 economy seats at 32 in pitch.',
+    note: 'A twin-aisle jet, 2-3-2 seating, about 196 seats. Two aisles help a lot.',
   }),
   Object.freeze({
     id: 'b787',
@@ -80,7 +84,7 @@ export const CABIN_PRESETS = Object.freeze([
     rows: 30,
     binCapacityPerSeatRow: 1.0,
     rowPitchMeters: 0.81,
-    note: 'Standard 787 economy in 3-3-3, ~270 seats; large pivot bins hold a bag per seat over 2 rows.',
+    note: 'A wide-body long-hauler, 3-3-3 seating, about 270 seats. Big bins fit a bag per seat.',
   }),
   Object.freeze({
     id: 'b777',
@@ -89,8 +93,13 @@ export const CABIN_PRESETS = Object.freeze([
     rows: 36,
     binCapacityPerSeatRow: 1.0,
     rowPitchMeters: 0.81,
-    note: 'High-density 3-4-3 in economy, ~360 seats total across the twin-aisle cabin.',
+    note: 'The dense long-haul jet, 3-4-3 seating, about 360 seats. Middle block has four across.',
   }),
+]);
+
+export const CABIN_PRESETS = Object.freeze([
+  ...SINGLE_CLASS_CABIN_PRESETS,
+  ...SECTION_CABIN_PRESETS,
 ]);
 
 export const CABIN_PRESET_BY_ID = Object.freeze(

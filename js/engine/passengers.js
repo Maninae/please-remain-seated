@@ -6,7 +6,9 @@
  * race's two cabins call this once with a shared rng and hand the same population to both sims.
  *
  * Each passenger carries the four geometry facts from seatColumnInfo (blockIndex, aisleIndex,
- * side, seatDepth) so the sims never have to re-derive them from col.
+ * side, seatDepth) so the sims never have to re-derive them from col. Sectioned cabins resolve
+ * geometry per row (block widths differ per section), so the sampling loop reads
+ * `seatColumnInfo(cabin, row, col)` rather than the row-agnostic form.
  *
  * `assignBagsToBins(cabin, passengers, rng)` fills bins as a random boarding order would, so a
  * deplaning-only run starts with realistic overflow (bags rows away from their owner). A boarding
@@ -14,12 +16,15 @@
  */
 
 import { PASSENGER_DEFAULTS } from './config.js';
-import { seatColumnInfo, colAt } from './cabin.js';
+import {
+  seatColumnInfo, colAt, seatsInRow, rowSection,
+} from './cabin.js';
 import { createBins, placeBag } from './bins.js';
 import {
   sampleCategorical, sampleLognormal, sampleWeibull, sampleExponential, sampleUniform,
 } from './distributions.js';
 import { createEmptyTimeSplit, Vis } from './types.js';
+import { assignClassAndStatus, alignGroupClassAndStatus } from './passenger-traits.js';
 
 export function samplePassengers(cabin, paramOverrides = {}, rng) {
   const params = { ...PASSENGER_DEFAULTS, ...paramOverrides };
@@ -41,7 +46,14 @@ export function samplePassengers(cabin, paramOverrides = {}, rng) {
     passenger.priority = traitsRng.next();
     passenger.patient = traitsRng.next() < params.patientFraction;
   }
+  // Cabin-class, fare, status and preboard live on their own fork for the same reason: adding
+  // them must not shift the traits fork above and thereby the population's bag placement or
+  // per-passenger tie-break ranking. Group members inherit the leader's status / fare / preboard
+  // once every raw draw is done.
+  const classRng = rng.fork('class');
+  assignClassAndStatus(passengers, params, cabin, classRng);
   alignGroupTraits(passengers);
+  alignGroupClassAndStatus(passengers);
   return passengers;
 }
 
@@ -74,6 +86,10 @@ function alignGroupTraits(passengers) {
   }
 }
 
+/**
+ * Row-aware seat key. `cabin.seatsPerRow` is the max across sections (see createCabin), so
+ * `row * seatsPerRow + col` is unique per seat even when block widths differ per section.
+ */
 function seatKey(cabin, row, col) {
   return row * cabin.seatsPerRow + col;
 }
@@ -82,7 +98,8 @@ function seatKey(cabin, row, col) {
 function sampleOccupiedSeats(cabin, loadFactor, rng) {
   const allSeats = [];
   for (let row = 1; row <= cabin.rows; row += 1) {
-    for (let col = 0; col < cabin.seatsPerRow; col += 1) allSeats.push({ row, col });
+    const width = seatsInRow(cabin, row);
+    for (let col = 0; col < width; col += 1) allSeats.push({ row, col });
   }
   const count = Math.round(loadFactor * allSeats.length);
   const chosen = rng.shuffle(allSeats).slice(0, count);
@@ -111,7 +128,7 @@ function assignGroups(cabin, occupiedSeats, params, rng) {
     if (size < 2) continue;
     const seats = [];
     for (let depth = 0; depth < size; depth += 1) {
-      const col = colAt(cabin, blockIndex, depth, aisleSide);
+      const col = colAt(cabin, row, blockIndex, depth, aisleSide);
       const key = seatKey(cabin, row, col);
       if (!occupied.has(key)) break;
       if (groupIdBySeat.has(key)) break;
@@ -125,14 +142,20 @@ function assignGroups(cabin, occupiedSeats, params, rng) {
   return groupIdBySeat;
 }
 
-/** Every (row, block, aisle-side) starting slot a group could occupy. Middle blocks contribute two. */
+/**
+ * Every (row, block, aisle-side) starting slot a group could occupy. Middle blocks contribute two.
+ * Sectioned cabins iterate per-row layouts, so a 3-3 economy row and a 2-2 first row produce
+ * different candidate slots on their own rows.
+ */
 function enumerateGroupSlots(cabin) {
   const slots = [];
   for (let row = 1; row <= cabin.rows; row += 1) {
-    for (let blockIndex = 0; blockIndex < cabin.layout.length; blockIndex += 1) {
-      const width = cabin.layout[blockIndex];
+    const section = cabin.sections[rowSection(cabin, row)];
+    const layout = section.layout;
+    for (let blockIndex = 0; blockIndex < layout.length; blockIndex += 1) {
+      const width = layout[blockIndex];
       const isOuterLeft = blockIndex === 0;
-      const isOuterRight = blockIndex === cabin.layout.length - 1;
+      const isOuterRight = blockIndex === layout.length - 1;
       if (isOuterLeft && !isOuterRight) {
         slots.push({ row, blockIndex, aisleSide: 0, maxSeats: width });
       } else if (isOuterRight && !isOuterLeft) {
@@ -164,7 +187,7 @@ function samplePassenger(cabin, params, rng, seatInfo) {
     const stow = sampleWeibull(rng, params.stowWeibullShape, params.stowWeibullScaleSeconds);
     stowSeconds.push(bag === 0 ? stow : stow + params.secondBagStowExtraSeconds);
   }
-  const geometry = seatColumnInfo(cabin, seatInfo.col);
+  const geometry = seatColumnInfo(cabin, seatInfo.row, seatInfo.col);
   return {
     id: seatInfo.id,
     row: seatInfo.row,
@@ -183,11 +206,16 @@ function samplePassenger(cabin, params, rng, seatInfo) {
     compliant: rng.next() < params.compliance,
     groupId: seatInfo.groupId,
     doorGapSeconds: sampleExponential(rng, params.doorInterArrivalMeanSeconds),
-    // priority and patient are filled in by samplePassengers from a separate `traits` fork so
-    // the introduction of these fields does not shift the pre-existing rng stream. See the
-    // fork(`traits`) block in samplePassengers.
+    // priority, patient, cabinClass, fare, status, and preboard are filled in by samplePassengers
+    // from separate `traits` and `class` forks so the introduction of these fields does not shift
+    // the pre-existing rng stream. See the fork(`traits`) and fork(`class`) blocks in
+    // samplePassengers.
     priority: 0,
     patient: false,
+    cabinClass: 'economy',
+    fare: 'main',
+    status: 'none',
+    preboard: false,
     phase: null,
     vis: Vis.SEATED,
     aisleCell: null,
@@ -205,7 +233,8 @@ function standardNormalish(rng) {
 
 /**
  * Fill bins as a random boarding order would and record each passenger's bag locations in bagBins.
- * Returns the bins. Bags that fit nowhere in their block are dropped (gate-checked) and bagCount shrinks.
+ * Returns the bins. Bags that fit nowhere in their (section, block) are dropped (gate-checked)
+ * and bagCount shrinks.
  */
 export function assignBagsToBins(cabin, passengers, rng) {
   const bins = createBins(cabin);

@@ -31,7 +31,7 @@
 
 import { SIM_DT_SECONDS, MAX_SIM_SECONDS, PASSENGER_DEFAULTS } from './config.js';
 import { EMPTY_CELL, BoardPhase, Vis, SimMode, TimeBucket, createEmptyTimeSplit } from './types.js';
-import { rowToCell } from './cabin.js';
+import { rowToCell, rowCellCount, cellToRow } from './cabin.js';
 import { createBins, placeBag, binAccessRow } from './bins.js';
 import { accountStep, createMetrics, sampleMetrics, summarizeMetrics } from './metrics.js';
 import { claimCell, releaseCell, moveCell, isCellEmpty } from './aisle.js';
@@ -190,10 +190,17 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
     if (passenger.aisleCell === passenger.targetCellBoard) onArrival(passenger);
   }
 
-  /** Aft = base walk cost; forward (counterflow) = base + per-cell share of the row-of-counterflow penalty. */
+  /**
+   * Aft = base walk cost; forward (counterflow) = base + per-cell share of the row-of-counterflow
+   * penalty. On a sectioned cabin the per-cell share depends on how many cells the walker's
+   * current row owns (2 for economy, 3 for a 44 in business lie-flat); in a galley cell we fall
+   * back to the default (economy) section's count.
+   */
   function walkCostPerCell(passenger, direction) {
     if (direction >= 0) return passenger.walkSecondsPerCell;
-    return passenger.walkSecondsPerCell + config.counterflowExtraSecondsPerRow / cabin.aisleCellsPerRow;
+    const row = cellToRow(cabin, passenger.aisleCell);
+    const cellsPerRow = row === null ? cabin.aisleCellsPerRow : rowCellCount(cabin, row);
+    return passenger.walkSecondsPerCell + config.counterflowExtraSecondsPerRow / cellsPerRow;
   }
 
   /**
@@ -218,9 +225,10 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
     const bagIndex = passenger.bagsStowedBoard;
     const chosen = placeBag(cabin, bins, passenger.row, passenger.blockIndex);
     if (chosen === null) {
-      // Gate-checked: the bin block is full. bagCount stays the sampled total (the UI reads it
-      // as "bags carried"); bagsRemaining decreases so the loop knows to move on. Splice the
-      // gate-checked bag out of the timing arrays so bagsStowedBoard keeps indexing correctly.
+      // Gate-checked: the (section, block) is full. bagCount stays the sampled total (the UI
+      // reads it as "bags carried"); bagsRemaining decreases so the loop knows to move on.
+      // Splice the gate-checked bag out of the timing arrays so bagsStowedBoard keeps indexing
+      // correctly.
       passenger.bagsRemaining -= 1;
       passenger.retrievalSeconds.splice(bagIndex, 1);
       passenger.stowSeconds.splice(bagIndex, 1);
@@ -228,8 +236,10 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
       return;
     }
     passenger.bagBins.push(chosen);
-    const binCell = rowToCell(cabin, binAccessRow(cabin, passenger.row, chosen));
-    const rowsAway = Math.abs(binCell - passenger.aisleCell) / cabin.aisleCellsPerRow;
+    // Distance to the chosen bin measured in cabin rows (not in cells), so a sectioned cabin with
+    // mixed pitches gets the right per-row counterflow charge whether the bin lands in a 2-cell
+    // economy row or a 3-cell business row.
+    const rowsAway = Math.abs(binAccessRow(cabin, passenger.row, chosen) - passenger.row);
     passenger.phase = BoardPhase.STOWING;
     passenger.vis = Vis.BAG;
     passenger.timer = passenger.stowSeconds[bagIndex] + config.counterflowExtraSecondsPerRow * rowsAway;

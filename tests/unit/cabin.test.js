@@ -21,6 +21,11 @@ function overridesFromPreset(preset) {
   };
 }
 
+// The "per preset" loop below asserts single-section geometry (layout ordering, seatColumnInfo
+// per col across the whole row, per-block bin capacities); sectioned presets are covered by
+// tests/unit/sections.test.js.
+const SINGLE_CLASS_PRESETS = CABIN_PRESETS.filter((preset) => !preset.sections);
+
 describe('cabin presets registry', () => {
   it('has the nine required presets and A320 as the default', () => {
     const ids = CABIN_PRESETS.map((preset) => preset.id);
@@ -37,14 +42,18 @@ describe('cabin presets registry', () => {
       assert.ok(!seen.has(preset.id), `duplicate preset id ${preset.id}`);
       seen.add(preset.id);
       assert.ok(typeof preset.note === 'string' && preset.note.length > 0, `preset ${preset.id} missing note`);
-      assert.ok(preset.layout.length >= 2, `preset ${preset.id} needs at least two blocks`);
-      assert.ok(preset.rows > 0);
+      const blockCount = preset.sections ? preset.sections[0].layout.length : preset.layout.length;
+      const rowCount = preset.sections
+        ? preset.sections.reduce((sum, section) => sum + section.rows, 0)
+        : preset.rows;
+      assert.ok(blockCount >= 2, `preset ${preset.id} needs at least two blocks`);
+      assert.ok(rowCount > 0);
     }
   });
 });
 
 describe('createCabin (per preset)', () => {
-  for (const preset of CABIN_PRESETS) {
+  for (const preset of SINGLE_CLASS_PRESETS) {
     it(`${preset.id}: seatColumnInfo round-trips through colAt for every column`, () => {
       const cabin = createCabin(overridesFromPreset(preset));
       const seatsPerRow = preset.layout.reduce((sum, width) => sum + width, 0);

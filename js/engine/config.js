@@ -127,6 +127,22 @@ export const PASSENGER_DEFAULTS = Object.freeze({
 
   // Boarding arrivals at the door: exponential inter-arrival, mean 3.7 s (Schultz baseline).
   doorInterArrivalMeanSeconds: 3.7,
+
+  // Frequent-flier status mix. Placeholder until the airline-research report lands; the airline
+  // boarding strategies use these fractions to decide who boards in a "top / gold / silver"
+  // priority zone versus general boarding. The numbers here are order-of-magnitude sensible
+  // (a US mainline flight is roughly 68% no-status, 20% silver, 8% gold, 4% top-tier) and are
+  // marked placeholder in design/05-sections-and-airlines.md.
+  statusFractions: Object.freeze({ none: 0.68, silver: 0.20, gold: 0.08, top: 0.04 }),
+
+  // Fraction of economy passengers on a "basic" fare that boards last regardless of status.
+  // Placeholder until research lands; roughly the industry basic-economy attach rate.
+  basicFareFraction: 0.30,
+
+  // Fraction of the whole cabin that pre-boards (families with small children, wheelchair
+  // assistance, unaccompanied minors). Pre-boarders board first regardless of strategy and their
+  // group-mates go with them. Placeholder until research lands.
+  preboardFraction: 0.04,
 });
 
 // Fixed simulation step. Walking a 0.4 m cell at 0.8 m/s is 0.5 s, so 0.1 s resolves every timer.

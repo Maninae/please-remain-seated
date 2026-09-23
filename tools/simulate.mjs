@@ -48,12 +48,20 @@ function printHelp() {
 }
 
 function cabinOverridesFromPreset(preset, extraRearDoor) {
-  const overrides = {
-    layout: preset.layout.slice(),
-    rows: preset.rows,
-    binCapacityPerSeatRow: preset.binCapacityPerSeatRow,
-    rowPitchMeters: preset.rowPitchMeters,
-  };
+  const overrides = preset.sections
+    ? {
+        // Sectioned presets carry the per-section layouts inside `sections`; the top-level
+        // `binCapacityPerSeatRow` and `premiumRows` are optional fallbacks the sections lean on.
+        sections: preset.sections,
+        binCapacityPerSeatRow: preset.binCapacityPerSeatRow,
+        premiumRows: preset.premiumRows,
+      }
+    : {
+        layout: preset.layout.slice(),
+        rows: preset.rows,
+        binCapacityPerSeatRow: preset.binCapacityPerSeatRow,
+        rowPitchMeters: preset.rowPitchMeters,
+      };
   if (extraRearDoor) overrides.rearDoor = true;
   return overrides;
 }
@@ -111,7 +119,7 @@ async function main() {
 
 function printTable(rows, meta) {
   const idWidth = Math.max(...rows.map((row) => row.id.length), 'strategy'.length) + 2;
-  console.log(`Preset ${meta.preset.label} (${meta.preset.layout.join('-')} x ${meta.preset.rows} rows), ${meta.seeds} seeds`);
+  console.log(`Preset ${meta.preset.label} (${describePresetShape(meta.preset)}), ${meta.seeds} seeds`);
   const paramNotes = [];
   if ('compliance' in meta.passengerOverrides) paramNotes.push(`compliance ${meta.passengerOverrides.compliance}`);
   if ('groupFraction' in meta.passengerOverrides) paramNotes.push(`groups ${meta.passengerOverrides.groupFraction}`);
@@ -133,6 +141,20 @@ function printTable(rows, meta) {
     const tput = row.throughputMedian.toFixed(1).padStart(17);
     console.log(`${row.id.padEnd(idWidth)}   ${mins}  ${p10}  ${p90}  ${tput}`);
   }
+}
+
+/**
+ * Human-readable layout summary for the header line. Single-class presets read as "3-3 x 30 rows";
+ * sectioned presets read as "first 2-2 x 4 / premium 3-3 x 6 / economy 3-3 x 20" so the CLI still
+ * makes the geometry obvious at a glance.
+ */
+function describePresetShape(preset) {
+  if (preset.sections) {
+    return preset.sections
+      .map((section) => `${section.id} ${section.layout.join('-')} x ${section.rows}`)
+      .join(' / ');
+  }
+  return `${preset.layout.join('-')} x ${preset.rows} rows`;
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

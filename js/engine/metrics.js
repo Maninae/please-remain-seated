@@ -89,6 +89,7 @@ export function summarizeMetrics(metrics, state) {
     meanSplit,
     lastSplit,
     throughputPerMinute: doorOpenThroughput(metrics, stagingSeconds, 120),
+    byClass: summariseByClass(state.passengers),
     series: {
       times: metrics.times,
       aisleOccupied: metrics.aisleOccupied,
@@ -96,6 +97,39 @@ export function summarizeMetrics(metrics, state) {
       doneCount: metrics.doneCount,
     },
   };
+}
+
+/**
+ * Mean time split and mean total per cabin class, so the page can say "first class off in 0:48,
+ * economy 6:10". Only classes with at least one passenger appear in the result. A single-section
+ * cabin returns one entry ({ economy: {...} }) since every passenger is economy.
+ */
+function summariseByClass(passengers) {
+  const byClass = {};
+  for (const passenger of passengers) {
+    const key = passenger.cabinClass ?? 'economy';
+    if (!byClass[key]) {
+      byClass[key] = {
+        count: 0,
+        meanTotal: 0,
+        meanSplit: { seatedWait: 0, aisleBlocked: 0, bags: 0, walking: 0 },
+      };
+    }
+    const entry = byClass[key];
+    entry.count += 1;
+    const total = passenger.timeSplit.seatedWait + passenger.timeSplit.aisleBlocked
+      + passenger.timeSplit.bags + passenger.timeSplit.walking;
+    entry.meanTotal += total;
+    for (const bucket of Object.keys(entry.meanSplit)) {
+      entry.meanSplit[bucket] += passenger.timeSplit[bucket];
+    }
+  }
+  for (const entry of Object.values(byClass)) {
+    const denominator = Math.max(1, entry.count);
+    entry.meanTotal /= denominator;
+    for (const bucket of Object.keys(entry.meanSplit)) entry.meanSplit[bucket] /= denominator;
+  }
+  return byClass;
 }
 
 /**

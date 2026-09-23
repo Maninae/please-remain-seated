@@ -26,7 +26,7 @@
  */
 
 import { DeplanePhase, EMPTY_CELL } from './types.js';
-import { rowToCell } from './cabin.js';
+import { rowToCell, rowCellCount } from './cabin.js';
 import { binAccessRow } from './bins.js';
 import { isCellEmpty } from './aisle.js';
 
@@ -142,10 +142,13 @@ export function arbitrateContests(state, strategy, groupPermits, rowMatesIndex, 
     if (!rowMatesCleared(passenger, rowMates)) continue;
     if (!strategyPermits(passenger, strategy, state, groupPermits)) continue;
     const aisleIndex = passenger.aisleIndex;
-    const pair = rowCellPair(state.cabin, passenger.row);
+    // Row cell run: 2 cells for economy 31 in, 3 for a 44 in business lie-flat. The stander may
+    // claim ANY cell of the run, forward first (closer to the door); a longer run gives more
+    // parallel access to the row for row-mates stepping in from opposite sides of the aisle.
+    const run = rowCellRun(state.cabin, passenger.row);
     let chosenCell = null;
     let chosenWalker = null;
-    for (const cell of pair) {
+    for (const cell of run) {
       const key = `${aisleIndex}:${cell}`;
       if (claimed.has(key)) continue;
       if (!isCellEmpty(state, aisleIndex, cell)) continue;
@@ -196,21 +199,30 @@ export function findContestingWalker(state, aisleIndex, cell, dtEps) {
   return null;
 }
 
-// -------------------- row-pair helpers --------------------
+// -------------------- row-run helpers --------------------
 
 /**
- * The two aisle cells that sit beside a row: [forwardCell, aftCell]. A row of 0.79 m pitch spans
- * two 0.4 m aisle cells; both are legitimate stepping-in cells for the row-mates of that row.
+ * The aisle cells that sit beside a row, forward to aft. A row of 0.79 m pitch spans two 0.4 m
+ * cells, a 44 in lie-flat business row spans three; every cell of the run is a legitimate
+ * stepping-in cell for the row-mates of that row.
  */
-export function rowCellPair(cabin, row) {
+export function rowCellRun(cabin, row) {
   const forward = rowToCell(cabin, row);
-  return [forward, forward + 1];
+  const count = rowCellCount(cabin, row);
+  const run = new Array(count);
+  for (let offset = 0; offset < count; offset += 1) run[offset] = forward + offset;
+  return run;
+}
+
+/** Backwards-compatible alias for the pair-only callers; a row's "pair" is its full cell run. */
+export function rowCellPair(cabin, row) {
+  return rowCellRun(cabin, row);
 }
 
 /**
- * The pair of aisle cells that a passenger can reach their next bag at: both cells of the row
- * that `binAccessRow` returns for the bin.
+ * The aisle cells a passenger can reach their next bag at: every cell of the row that
+ * `binAccessRow` returns for the bin.
  */
 export function bagAccessCells(cabin, passenger, binIdx) {
-  return rowCellPair(cabin, binAccessRow(cabin, passenger.row, binIdx));
+  return rowCellRun(cabin, binAccessRow(cabin, passenger.row, binIdx));
 }

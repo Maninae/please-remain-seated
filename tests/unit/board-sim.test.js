@@ -21,6 +21,13 @@ import { createBoardSim } from '../../js/engine/board-sim.js';
 import { BOARD_STRATEGIES, BOARD_STRATEGY_BY_ID, seatType, computeMaxDepthByBlockSide } from '../../js/engine/strategies/board.js';
 
 function overridesFromPreset(preset) {
+  if (preset.sections) {
+    return {
+      sections: preset.sections,
+      binCapacityPerSeatRow: preset.binCapacityPerSeatRow,
+      premiumRows: preset.premiumRows,
+    };
+  }
   return {
     layout: preset.layout.slice(),
     rows: preset.rows,

@@ -44,7 +44,7 @@ import { DeplanePhase, SimMode, Vis, EMPTY_CELL } from './types.js';
 import { accountStep, createMetrics, sampleMetrics, summarizeMetrics } from './metrics.js';
 import { claimCell, createDoorServers, isCellEmpty } from './aisle.js';
 import {
-  indexRowMates, computeGroupPermits, arbitrateContests, bagAccessCells, rowCellPair,
+  indexRowMates, computeGroupPermits, arbitrateContests, bagAccessCells, rowCellRun,
 } from './deplane-rules.js';
 import { processWalkers, admitAtDoors } from './deplane-walk.js';
 import { DEPLANE_STRATEGY_BY_ID } from './strategies/deplane.js';
@@ -181,8 +181,9 @@ function readyEligible(passenger, state) {
   if (state.t < state.doorOpenAtSeconds) return false;
   const aisle = state.aisles[passenger.aisleIndex];
   if (!aisle) return true;
-  const pair = rowCellPair(state.cabin, passenger.row);
-  return aisle[pair[0]] === EMPTY_CELL || aisle[pair[1]] === EMPTY_CELL;
+  const run = rowCellRun(state.cabin, passenger.row);
+  for (const cell of run) if (aisle[cell] === EMPTY_CELL) return true;
+  return false;
 }
 
 /**
@@ -244,18 +245,18 @@ function routeInAisle(state, cabin) {
   for (const passenger of state.passengers) {
     if (passenger.phase !== P.IN_AISLE) continue;
     if (passenger.bagBins && passenger.bagBins.length > 0) {
-      const pair = bagAccessCells(cabin, passenger, passenger.bagBins[0]);
-      if (pair.includes(passenger.aisleCell)) {
-        // Already in the bin's access-row pair; retrieve without walking.
+      const run = bagAccessCells(cabin, passenger, passenger.bagBins[0]);
+      if (run.includes(passenger.aisleCell)) {
+        // Already in the bin's access-row run; retrieve without walking.
         passenger.phase = P.RETRIEVING;
         passenger.timer = Math.max(0, passenger.retrievalSeconds[0] || 0);
         passenger.vis = Vis.BAG;
       } else {
-        // Walk toward the nearer cell of the pair, arrive at whichever cell we reach first.
+        // Walk toward the nearer end of the run, arrive at whichever cell we reach first.
         passenger.phase = P.WALKING;
-        passenger.walkTargetCell = pickNearerPairCell(passenger.aisleCell, pair);
+        passenger.walkTargetCell = pickNearerRunCell(passenger.aisleCell, run);
         passenger.walkPurpose = 'bag';
-        passenger.walkTargetPair = pair;
+        passenger.walkTargetPair = run;
         passenger.timer = passenger.walkSecondsPerCell + passenger.pendingCounterflowSeconds;
         passenger.pendingCounterflowSeconds = 0;
         passenger.vis = Vis.MOVING;
@@ -278,13 +279,14 @@ function routeInAisle(state, cabin) {
 }
 
 /**
- * Given a walker at `currentCell` and the two-cell pair they want to reach, return the pair's
- * near cell in the walker's direction of travel. Coming from aft, they hit the aft cell first;
- * coming from forward, they hit the forward cell first; already inside the pair, walkTargetCell
- * is either.
+ * Given a walker at `currentCell` and the row's cell run they want to reach, return the run's
+ * near cell in the walker's direction of travel. Coming from aft, they hit the aft-most cell of
+ * the run first; coming from forward, they hit the forward-most cell first; already inside the
+ * run, walkTargetCell is the forward-most cell (any cell suffices; arrival is by containment).
  */
-function pickNearerPairCell(currentCell, pair) {
-  const [forward, aft] = pair;
+function pickNearerRunCell(currentCell, run) {
+  const forward = run[0];
+  const aft = run[run.length - 1];
   if (currentCell > aft) return aft;
   if (currentCell < forward) return forward;
   return forward;
