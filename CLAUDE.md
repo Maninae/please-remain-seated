@@ -54,6 +54,7 @@ js/ui/                        DOM, driven by the store.
   race.js                        orchestrator: two sims, lockstep stepping, DOM wiring
   race-follow.js                 follow-a-passenger + hover tooltip + live-gap slot
   race-finish.js                 finish detection, result-card scroll, worst-seats heat view, heat toggle
+  race-why.js                    "why" line composer (biggest average time-split gap between winner and loser)
   race-loop.js                   requestAnimationFrame stepping at the chosen speed multiplier
   race-sims.js                   builds the two race sims from a store snapshot
   race-helpers.js                orientation, lane-node lookup, hit-test radius

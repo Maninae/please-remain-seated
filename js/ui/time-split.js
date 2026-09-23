@@ -57,9 +57,23 @@ function pickPassenger(lane, passengers, mode) {
   if (lane.target === 'average') {
     return { split: averageSplit(passengers), caption: 'average passenger' };
   }
-  const passenger = lastPassenger(passengers);
-  const lastCaption = mode === 'board' ? 'last on' : 'last off';
-  return { split: passenger ? passenger.timeSplit || EMPTY_SPLIT : { ...EMPTY_SPLIT }, caption: lastCaption };
+  // "Last" target during a running race: NEW3-m2 caught the prior rule (pick the passenger with
+  // the maximum accumulated total) collapsing to whoever had been aboard longest, which is the
+  // same elapsed stopwatch in both lanes. Both bars then printed identical totals for roughly
+  // 75% of the race, contradicting the live-gap sentence that said one lane was 30 passengers
+  // ahead. Fix: while the race is running, "last" means the slowest passenger who has actually
+  // exited so far (rank by total split time among the done set). If nobody has exited yet, fall
+  // back to the running average with a caption that says so, instead of pretending it is a
+  // "last off" who has not left.
+  const doneOnly = passengers.filter((p) => p && p.vis === 'done');
+  if (doneOnly.length === 0) {
+    return { split: averageSplit(passengers), caption: 'average so far, nobody off yet' };
+  }
+  const passenger = lastPassenger(doneOnly);
+  const raceComplete = doneOnly.length === passengers.length;
+  const lastVerb = mode === 'board' ? 'on' : 'off';
+  const caption = raceComplete ? `last ${lastVerb}` : `slowest ${lastVerb} so far`;
+  return { split: passenger ? passenger.timeSplit || EMPTY_SPLIT : { ...EMPTY_SPLIT }, caption };
 }
 
 function letterFor(cabin, passenger) {

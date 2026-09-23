@@ -130,6 +130,16 @@ body {
   letter-spacing: 0.01em;
 }
 
+/* Round-02 NEW-m4 carry-over: the masthead mode toggle (Deplane / Board) was measured at
+ * 32 px, under the 44 px tap-target spec. Bump this instance so the two mode tabs are
+ * comfortable on a touch device without inflating the smaller in-flow speed pips inside
+ * `#speed-group` or the tiny `.time-split .toggle-row` pips. */
+.masthead .segmented .seg {
+  min-height: var(--tap);
+  padding: 8px 18px;
+  font-size: 14px;
+}
+
 .segmented .seg:hover { color: var(--ink); }
 .segmented .seg[aria-pressed="true"],
 .segmented .seg.on {

@@ -44,10 +44,12 @@
 .card-header .strategy-picker select {
   font-size: 15px;
   font-weight: 600;
-  padding: 6px 26px 6px 8px;
+  padding: 8px 26px 8px 8px;
   border-color: transparent;
   background-color: transparent;
-  min-height: 34px;
+  /* Bumped from 34 px to 44 px (round-02 NEW-m4 carry-over): the strategy dropdown is the
+   * primary tap target on each cabin card and must meet the spec. */
+  min-height: var(--tap);
   min-width: 12ch;
   max-width: 40ch;
   color: var(--ink);
@@ -196,6 +198,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  position: relative;
 }
 .race-legend .swatch::before {
   content: "";
@@ -212,16 +215,22 @@
 .race-legend .swatch.bag::before {
   background: transparent;
   border: 1.5px solid currentColor;
-  position: relative;
 }
+/* NEW3-m1: the amber square must sit INSIDE the ring so the legend teaches "bag = amber glyph
+ * inside a hollow ring". The prior rule appended it after the text with margin-left: -8px,
+ * which landed the square on the descender of "g" and read as a rendering fault on the one
+ * element whose job is to teach the colour language. Absolute-positioning it on top of the
+ * ring pin keeps the geometry stable across font-size and gap tweaks. */
 .race-legend .swatch.bag::after {
   content: "";
   width: 5px; height: 5px;
   border-radius: 1px;
   background: var(--bag);
-  display: inline-block;
-  margin-left: -8px;
-  align-self: center;
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 .race-legend .swatch.seated  { color: #a9a193; }
 
@@ -492,3 +501,128 @@
   border-radius: 2px;
   display: inline-block;
 }
+
+/* Follow-active state on the split-target toggle: while a passenger is being followed, both
+ * Last and Average read as inactive so the toggle stops claiming ownership of a state the UI
+ * is not in. Round-01 n3 / round-02 NEW-m5: the toggle used to stay lit on "Last" while the
+ * subtitle simultaneously named a followed passenger and the follow line described them, three
+ * surfaces disagreeing at once. Now the group carries `.following` for the CSS below and the
+ * subtitle names the followed seat. */
+.time-split .toggle-row .segmented.following .seg {
+  background: transparent;
+  color: var(--ink-muted);
+  opacity: 0.65;
+}
+
+/* Compare "Run it" button: bump to the 44 px tap-target spec (round-02 NEW-m4 carry-over). */
+.compare .controls-row #btn-compare {
+  min-height: var(--tap);
+  padding: 10px 22px;
+  font-size: 14px;
+}
+
+/* --- Finish-mode chrome (NEW3-M3) ---------------------------------------------------------
+ *
+ * When both lanes have finished, collapse each cabin card into its heat-map essentials so both
+ * cabins AND the finish card fit inside a 1280x800 laptop viewport at once (round-3 critic
+ * measured only lane B on screen at 1280x720/800, 1440x900 and 1512x982). We keep the cabin the
+ * largest element after the clocks — the cabin's canvas still fills the card — but shrink the
+ * card chrome around it and cap the canvas per viewport height so two of them plus the finish
+ * card can share the fold. Everything is CSS-only: race-finish.js just toggles the body class.
+ *
+ * `.finish-mode-one-lane` applies while ONLY the fast lane has crossed; it shows the finish
+ * card (compact "still going" state) without shrinking the still-racing canvas, so the losing
+ * lane's live seat activity stays legible until both are done.
+ */
+
+body.finish-mode .race { gap: 8px; margin-top: 8px; }
+body.finish-mode .race .cabin-card {
+  padding: 6px 10px;
+  gap: 4px;
+}
+
+/* Desktop-only compact card header at finish. On phone (< 900 px) the header stays a single-
+ * column stack (strategy above count above clock), the same shape it uses during the race, so
+ * a 400 px viewport never has to fight three columns for space. */
+@media (min-width: 900px) {
+  body.finish-mode .race .cabin-card .card-header {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    min-height: 34px;
+    gap: 12px;
+    align-items: center;
+  }
+}
+body.finish-mode .race .cabin-card .card-header .strategy-picker { gap: 0; }
+body.finish-mode .race .cabin-card .card-header .strategy-picker .blurb { display: none; }
+body.finish-mode .race .cabin-card .card-header .strategy-picker select {
+  min-height: 34px;
+  padding: 4px 22px 4px 6px;
+  font-size: 14px;
+}
+body.finish-mode .race .cabin-card .card-header .count { font-size: 12px; }
+body.finish-mode .race .cabin-card .card-header .clock {
+  font-size: clamp(24px, 3vw, 32px);
+}
+body.finish-mode .race .cabin-card .card-header .margin {
+  font-size: 11px;
+  margin-top: 0;
+}
+body.finish-mode .race .cabin-card .card-header .door-status { display: none; }
+
+/* Cap the canvas per viewport height so two cabin cards AND the finish card fit inside
+ * 800 px (round-3 NEW3-M3: the prior layout showed only one cabin at the finish on every
+ * laptop viewport up to 1512x982). Budget: 800 vh - 40 vh margins for gaps and finish card
+ * chrome, divided by two cabins. Inline `wrap` heights come from canvas-sizing.js; we
+ * override with !important because a specific 220 px inline height otherwise wins here.
+ * Phone (vertical orientation): out of scope for the cap. The 400 px phone already shows
+ * both cabins side by side plus the card (`21-phone-finish.png` in the round-3 pass). */
+@media (min-width: 900px) {
+  body.finish-mode .race .canvas-wrap {
+    height: clamp(140px, calc((100vh - 470px) / 2), 200px) !important;
+    max-height: 200px;
+  }
+}
+
+/* Round-02 NEW-M3 carry-over: on a 1280x800 laptop the two cabin cards + race-controls used
+ * to add up to ~1000 px, so Restart / speed / seed / heat all sat below the fold on cold
+ * load. Shave 50-60 px off the cabin card at short heights so those persistent controls fit
+ * inside the initial viewport. Only applies at desktop widths (≥ 900 px) and short viewport
+ * heights (≤ 850 px); phones and tall monitors keep the roomier layout. */
+@media (min-width: 900px) and (max-height: 850px) {
+  body:not(.finish-mode) .race { gap: 10px; margin-top: 12px; }
+  body:not(.finish-mode) .race .cabin-card {
+    padding: 8px 12px;
+    gap: 4px;
+  }
+  body:not(.finish-mode) .race .cabin-card .card-header { min-height: 40px; }
+  body:not(.finish-mode) .race .cabin-card .card-header .clock {
+    font-size: clamp(28px, 4.4vw, 44px);
+  }
+  body:not(.finish-mode) .race .canvas-wrap {
+    height: clamp(150px, calc((100vh - 490px) / 2), 200px) !important;
+  }
+  body:not(.finish-mode) .race .follow-line,
+  body:not(.finish-mode) .race .race-legend { min-height: 1em; }
+  body:not(.finish-mode) .race-controls { margin-top: 6px; padding: 4px 4px; }
+}
+
+/* The bottom-of-card lines are noise in the finish view: the follow line has no target once
+ * the cabins are empty and the legend has been swapped to the heat caption which is the only
+ * legend the reader needs at the finish. */
+body.finish-mode .race .follow-line { display: none; }
+body.finish-mode .race .cabin-card[data-lane="a"] .race-legend:not(.heat-caption) { display: none; }
+body.finish-mode .race .cabin-card[data-lane="b"] .race-legend:not(.heat-caption) { display: none; }
+
+/* Finish card packs tighter, too, so the whole payoff strip is one clean bar the eye reads at
+ * a glance. */
+body.finish-mode .finish-card { padding: 10px 14px; margin-top: 8px; }
+body.finish-mode .finish-card .headline { font-size: 16px; line-height: 1.3; }
+body.finish-mode .finish-card .why { font-size: 12px; }
+body.finish-mode .finish-card .facts { font-size: 11px; }
+
+/* Provisional (one-lane-done) styling: show the finish card while the second lane keeps
+ * running. Deliberately quiet: it's a status readout, not the final answer. */
+.finish-card.provisional { background: var(--paper); border-style: dashed; }
+.finish-card.provisional .headline { font-size: 15px; }
+.finish-card.provisional .why { color: var(--ink-soft); font-style: italic; }
+body.finish-mode-one-lane .finish-card.provisional { margin-top: 10px; }

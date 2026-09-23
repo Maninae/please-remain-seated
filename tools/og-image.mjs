@@ -19,7 +19,10 @@ import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
-const DEFAULT_QUERY = 'mode=deplane&a=free-for-all&b=two-doors&seed=og-1&preset=a320&speed=60';
+// The og image is the first-visit default matchup: free-for-all vs row-by-row. The lead's
+// call in round-3 was that this is what a visitor sees on cold load, so the social card should
+// show it, not the two-doors headline the compare chart owns.
+const DEFAULT_QUERY = 'mode=deplane&a=free-for-all&b=row-by-row&seed=og-1&preset=a320&speed=60';
 const DEFAULT_OUT = path.resolve('media/og.png');
 const DEFAULT_WAIT_MS = 800;
 // The og:image is 1200x630 by convention. The desktop layout stacks the two cabin cards

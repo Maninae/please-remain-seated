@@ -17,6 +17,7 @@
 import { formatClock } from './format.js';
 import { CABIN_PRESET_BY_ID } from '../engine/cabin-presets.js';
 import { DEPLANE_STRATEGY_BY_ID, BOARD_STRATEGY_BY_ID } from '../engine/strategies/index.js';
+import { composeWhyLine } from './race-why.js';
 
 const HEAT_BUCKET_KEYS = ['seatedWait', 'aisleBlocked', 'bags', 'walking'];
 
@@ -42,6 +43,12 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
     }
     const toggleRow = document.getElementById('heat-toggle-row');
     if (toggleRow) toggleRow.hidden = true;
+    // NEW3-M3: drop the finish-mode class so the two cabin cards return to their full-height
+    // race chrome (blurbs visible, taller canvases). Set again on both-lanes finish below.
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('finish-mode');
+      document.body.classList.remove('finish-mode-one-lane');
+    }
   }
 
   function isFinished(laneIndex) { return laneFinishSeconds[laneIndex] !== null; }
@@ -69,13 +76,89 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
       if (onFinish) onFinish(winner);
       emitRaceFinished({ winnerLane: winner, loserLane: loser });
       scrollFinishIntoView();
+      // NEW3-M3: on both-lanes finish, swap in the tight finish-mode chrome (compact cabin
+      // headers, shorter canvases) so both cabins AND the result card fit inside 800 px on a
+      // laptop. Kept out of the one-lane-finished branch below so the still-racing cabin does
+      // not shrink mid-race. requestAnimationFrame gives the CSS class time to apply before we
+      // re-fit the canvas backing store to the new wrap height, so the seat heat map draws at
+      // the right resolution instead of a stretched larger canvas.
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('finish-mode-one-lane');
+        document.body.classList.add('finish-mode');
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+          window.requestAnimationFrame(() => {
+            for (const view of laneViews) if (view && view.resize) view.resize();
+            applyHeatToBothLanes();
+          });
+        }
+      }
       const toggleRow = document.getElementById('heat-toggle-row');
       if (toggleRow) toggleRow.hidden = false;
+    } else {
+      // Fast-lane just finished; the slow lane keeps running with its live count. Fire a
+      // provisional finish so the finish card shows "X finished at m:ss, Y still going (n of
+      // N)" and the card is on screen at the moment the fast lane crosses the line. On the
+      // default matchup (free-for-all vs row-by-row) the losing lane still has minutes of
+      // race to run, so the site is meant to feel alive across that whole tail. Fix for
+      // NEW3-M4's "the race must still feel alive after the fast lane finishes" acceptance
+      // criterion. Apply BOTH finish-mode and finish-mode-one-lane: the compact chrome brings
+      // the provisional finish card into view alongside both cabins on a laptop, and the
+      // -one-lane class lets CSS keep the still-racing cabin's canvas at full legibility.
+      emitProvisionalFinish(laneIndex, other);
+      if (typeof document !== 'undefined') {
+        document.body.classList.add('finish-mode');
+        document.body.classList.add('finish-mode-one-lane');
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+          window.requestAnimationFrame(() => {
+            for (const view of laneViews) if (view && view.resize) view.resize();
+          });
+        }
+      }
+      scrollFinishIntoView();
     }
     const canvas = laneNodes[laneIndex].canvas;
     const laneLetter = laneIndex === 0 ? 'Left' : 'Right';
     canvas.setAttribute('aria-label',
       `${laneLetter} cabin: finished at ${formatClock(laneFinishSeconds[laneIndex])}. Seats coloured by total time aboard from door open.`);
+  }
+
+  function emitProvisionalFinish(finishedLane, otherLane) {
+    const state = store.state();
+    const finishedId = strategyIdForLane(state, finishedLane);
+    const otherId = strategyIdForLane(state, otherLane);
+    const finishedLabel = labelForStrategyId(state, finishedId);
+    const otherLabel = labelForStrategyId(state, otherId);
+    const otherSim = laneSims[otherLane];
+    const otherTotal = otherSim ? otherSim.state.passengers.length : 0;
+    const otherDone = otherSim ? otherSim.state.doneCount : 0;
+    const payload = {
+      finishedLane, otherLane,
+      finishedLabel, otherLabel,
+      finishedSeconds: laneFinishSeconds[finishedLane],
+      otherRemaining: Math.max(0, otherTotal - otherDone),
+      otherTotal,
+      mode: state.mode,
+    };
+    window.dispatchEvent(new CustomEvent('prs:race-first-lane-finished', { detail: payload }));
+  }
+
+  function updateProvisionalStatus() {
+    // Ticked by race.js as the slower lane's count changes. The finish card owns the DOM; we
+    // just push it fresh numbers so its "Y still going, n of N" line stays live without a full
+    // re-render. Nothing to do if both lanes are done.
+    if (!isOneLaneFinished()) return;
+    const finishedLane = laneFinishSeconds[0] !== null ? 0 : 1;
+    const otherLane = finishedLane === 0 ? 1 : 0;
+    const otherSim = laneSims[otherLane];
+    if (!otherSim) return;
+    const remaining = Math.max(0, otherSim.state.passengers.length - otherSim.state.doneCount);
+    window.dispatchEvent(new CustomEvent('prs:race-first-lane-tick', {
+      detail: { otherRemaining: remaining, otherTotal: otherSim.state.passengers.length },
+    }));
+  }
+
+  function isOneLaneFinished() {
+    return (laneFinishSeconds[0] !== null) !== (laneFinishSeconds[1] !== null);
   }
 
   function emitRaceFinished({ winnerLane, loserLane }) {
@@ -103,19 +186,22 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
   }
 
   function scrollFinishIntoView() {
-    // Bring lane B and the finish card into the viewport together so the player sees the result
-    // without scrolling. Fix for NEW-B1. Respects prefers-reduced-motion: reduce.
+    // Bring the finish card into view, AND keep both cabin cards on screen. Round-3 caught the
+    // prior `block: 'center'` scroll placing only lane B on screen at 1280x720/800, 1440x900 and
+    // 1512x982 (NEW3-M3). Now we scroll so the whole race section sits at the top of the
+    // viewport: with the finish-mode chrome shrinking each cabin card, the two cabins and the
+    // result card fit inside 800 px on a laptop with the masthead pushed above the fold — which
+    // is exactly the trade-off the round-3 fix asks for. Fix for both NEW-B1 (card in view) and
+    // NEW3-M3 (both cabins in view together). Respects prefers-reduced-motion: reduce.
     if (typeof window === 'undefined') return;
     const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const target = document.getElementById('finish-card');
-    if (!target) return;
     const behavior = reduce ? 'auto' : 'smooth';
-    // Small deferral so the card has already been rendered by finish-card.js.
+    const race = document.querySelector('.race');
     setTimeout(() => {
       try {
-        target.scrollIntoView({ behavior, block: 'center' });
+        (race || document.getElementById('finish-card')).scrollIntoView({ behavior, block: 'start' });
       } catch (error) {
-        target.scrollIntoView(true);
+        (race || document.getElementById('finish-card')).scrollIntoView(true);
       }
     }, 40);
   }
@@ -230,59 +316,8 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
     toggleHeat,
     isHeatOn,
     getLastFinishPayload: () => lastFinishPayload,
+    updateProvisionalStatus,
   };
-}
-
-/**
- * The "why" line: which of the four time buckets was the biggest average gap. Populates the
- * finish card. Kept in this module because it walks the same finish-time data.
- */
-export function composeWhyLine(winnerSim, loserSim, winnerLabel, loserLabel) {
-  if (!winnerSim || !loserSim) return '';
-  const winnerAvg = averageSplit(winnerSim.state.passengers);
-  const loserAvg = averageSplit(loserSim.state.passengers);
-  const dominant = biggestGap(winnerAvg, loserAvg);
-  if (!dominant) return '';
-  const winnerSec = formatClock(dominant.winner);
-  const loserSec = formatClock(dominant.loser);
-  return `${winnerLabel} averaged ${winnerSec} ${dominant.label} vs ${loserLabel}'s ${loserSec}.`;
-}
-
-function averageSplit(passengers) {
-  const out = { seatedWait: 0, aisleBlocked: 0, bags: 0, walking: 0 };
-  if (!passengers || passengers.length === 0) return out;
-  for (const p of passengers) {
-    const s = p.timeSplit || out;
-    out.seatedWait += s.seatedWait || 0;
-    out.aisleBlocked += s.aisleBlocked || 0;
-    out.bags += s.bags || 0;
-    out.walking += s.walking || 0;
-  }
-  const n = passengers.length;
-  return {
-    seatedWait: out.seatedWait / n,
-    aisleBlocked: out.aisleBlocked / n,
-    bags: out.bags / n,
-    walking: out.walking / n,
-  };
-}
-
-const BUCKET_LABELS = {
-  seatedWait: 'seated',
-  aisleBlocked: 'aisle-blocked',
-  bags: 'on bags',
-  walking: 'walking',
-};
-
-function biggestGap(winnerAvg, loserAvg) {
-  let best = null;
-  for (const key of Object.keys(BUCKET_LABELS)) {
-    const gap = (loserAvg[key] || 0) - (winnerAvg[key] || 0);
-    if (best == null || gap > best.gap) {
-      best = { key, gap, label: BUCKET_LABELS[key], winner: winnerAvg[key] || 0, loser: loserAvg[key] || 0 };
-    }
-  }
-  return best;
 }
 
 function defaultLegendHtml(mode) {

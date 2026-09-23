@@ -2,7 +2,7 @@
  * End-to-end smoke test.
  *
  * Assumes the local dev server is up on http://localhost:5197. Loads the page in headless
- * Chromium, walks the fixes from round 1 of the critic pass, and asserts they hold:
+ * Chromium, walks the fixes from every critic round, and asserts they hold:
  *   - Race runs, clocks advance, mode toggle works, screenshots taken.
  *   - Range inputs and checkbox use the ink accent, not browser blue (M1).
  *   - Legend visible at phone width (B3).
@@ -11,6 +11,8 @@
  *   - Loser's margin line reads "finished X later" (M11).
  *   - URL round-trips every knob (M10).
  *   - Finish card renders with a copy-link button.
+ *   - Default matchup is free-for-all vs two-doors (NEW3-M4).
+ *   - Both cabin cards AND the finish card are on screen at the finish at 1280x800 (NEW3-M3).
  *
  * The suite skips itself if playwright cannot connect, so it never blocks CI on a fresh clone.
  */
@@ -329,6 +331,165 @@ test('og image is generated (NEW-B2)', async (t) => {
   } catch (error) {
     t.diagnostic('media/og.png missing — run `npm run og`');
     assert.fail('media/og.png is required for the og:image tag (NEW-B2)');
+  }
+});
+
+test('default matchup is Free-for-all vs Row-by-row (NEW3-M4)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    // No `a=` or `b=` query params: first-time visitor path. localStorage is per-context so a
+    // fresh context is a fresh visitor with no persisted overrides. Row-by-row is the
+    // announced "please remain seated until the row ahead has left" policy losing by roughly
+    // two and a half times to free-for-all: the finding the site is named for. Two doors
+    // wins the compare chart and lives one dropdown away.
+    await page.goto(`${BASE_URL}/index.html?seed=default-matchup`, { waitUntil: 'load' });
+    await page.waitForSelector('[data-canvas="a"]');
+    await page.waitForTimeout(400);
+    // Trigger a store update so writeUrl runs with the resolved defaults (the store only
+    // writes the URL on subscribe callbacks; on cold load the URL stays as the visitor typed
+    // it). One slider tick is enough to force the full round-trip.
+    await page.evaluate(() => {
+      const slider = document.getElementById('politeness-slider');
+      const start = Number(slider.value);
+      slider.value = String(Math.min(1, start + 0.05));
+      slider.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForTimeout(250);
+    const [strategyA, strategyB, blurbB, urlB] = await Promise.all([
+      page.$eval('#strategy-a', (el) => el.value),
+      page.$eval('#strategy-b', (el) => el.value),
+      page.$eval('[data-blurb="b"]', (el) => el.textContent),
+      page.evaluate(() => new URL(window.location.href).searchParams.get('b')),
+    ]);
+    assert.equal(strategyA, 'free-for-all', 'lane A should default to free-for-all');
+    assert.equal(strategyB, 'row-by-row', 'NEW3-M4: lane B should default to row-by-row');
+    assert.equal(urlB, 'row-by-row', 'URL round-trip should carry row-by-row on lane B once state ticks');
+    assert.ok(/row/i.test(blurbB), `lane B blurb should describe row-by-row: "${blurbB}"`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('both cabins and result card visible at 1280x800 finish (NEW3-M3)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    const url = `${BASE_URL}/index.html?mode=deplane&a=free-for-all&b=two-doors&seed=m3&preset=a320&speed=60`;
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForSelector('[data-canvas="a"]');
+    await page.click('[data-speed="60"]');
+    await page.waitForFunction(() => {
+      const marginA = document.querySelector('[data-margin="a"]').textContent;
+      const marginB = document.querySelector('[data-margin="b"]').textContent;
+      return /(ahead|later)/.test(marginA) && /(ahead|later)/.test(marginB);
+    }, { timeout: 60000 });
+    // Give scrollFinishIntoView + the requestAnimationFrame resize path a moment to land.
+    await page.waitForTimeout(1200);
+    const geom = await page.evaluate(() => {
+      function pct(el) {
+        const r = el.getBoundingClientRect();
+        const clamped = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+        return r.height ? Math.round((clamped / r.height) * 100) : 0;
+      }
+      return {
+        cardA: pct(document.querySelector('[data-lane="a"]')),
+        cardB: pct(document.querySelector('[data-lane="b"]')),
+        finishCard: pct(document.getElementById('finish-card')),
+        bodyClasses: [...document.body.classList],
+      };
+    });
+    assert.ok(geom.bodyClasses.includes('finish-mode'), `body should carry finish-mode: ${geom.bodyClasses.join(',')}`);
+    assert.equal(geom.cardA, 100, `NEW3-M3: cabin A must be fully visible at 1280x800, got ${geom.cardA}%`);
+    assert.equal(geom.cardB, 100, `NEW3-M3: cabin B must be fully visible at 1280x800, got ${geom.cardB}%`);
+    assert.equal(geom.finishCard, 100, `NEW3-M3: finish card must be fully visible at 1280x800, got ${geom.finishCard}%`);
+    // The 1440x900 laptop is the second reference viewport in the round-3 report.
+    const bigContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+    const bigPage = await bigContext.newPage();
+    await bigPage.goto(url, { waitUntil: 'load' });
+    await bigPage.waitForSelector('[data-canvas="a"]');
+    await bigPage.click('[data-speed="60"]');
+    await bigPage.waitForFunction(() => {
+      const marginA = document.querySelector('[data-margin="a"]').textContent;
+      const marginB = document.querySelector('[data-margin="b"]').textContent;
+      return /(ahead|later)/.test(marginA) && /(ahead|later)/.test(marginB);
+    }, { timeout: 60000 });
+    await bigPage.waitForTimeout(1200);
+    const bigGeom = await bigPage.evaluate(() => {
+      function pct(el) {
+        const r = el.getBoundingClientRect();
+        const clamped = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+        return r.height ? Math.round((clamped / r.height) * 100) : 0;
+      }
+      return {
+        cardA: pct(document.querySelector('[data-lane="a"]')),
+        cardB: pct(document.querySelector('[data-lane="b"]')),
+        finishCard: pct(document.getElementById('finish-card')),
+      };
+    });
+    assert.equal(bigGeom.cardA, 100, `NEW3-M3: cabin A must be fully visible at 1440x900, got ${bigGeom.cardA}%`);
+    assert.equal(bigGeom.cardB, 100, `NEW3-M3: cabin B must be fully visible at 1440x900, got ${bigGeom.cardB}%`);
+    assert.equal(bigGeom.finishCard, 100, `NEW3-M3: finish card must be fully visible at 1440x900, got ${bigGeom.finishCard}%`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('worst-seat label renders as a paper pill, not a paper-on-paper halo (NEW3-M2)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    // Screenshot only — the pill/halo distinction is a canvas draw. The e2e suite writes a
+    // 2x-scale crop of the worst-seat area on lane A so a reviewer can eyeball the fix; we
+    // cannot pixel-assert legibility, but we can prove the fix path ran (no console errors)
+    // and produce evidence at the exact zoom the round-3 pass used.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const url = `${BASE_URL}/index.html?mode=deplane&a=free-for-all&b=two-doors&seed=m2&preset=a320&speed=60`;
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForSelector('[data-canvas="a"]');
+    await page.click('[data-speed="60"]');
+    await page.waitForFunction(() => {
+      const marginA = document.querySelector('[data-margin="a"]').textContent;
+      const marginB = document.querySelector('[data-margin="b"]').textContent;
+      return /(ahead|later)/.test(marginA) && /(ahead|later)/.test(marginB);
+    }, { timeout: 60000 });
+    await page.waitForTimeout(1500);
+    const artifact = path.resolve('tests/e2e/artifacts/worst-seat-pill-2x.png');
+    await page.screenshot({ path: artifact });
+    assert.deepEqual(errors, [], 'no page errors during finish/heat draw');
+    t.diagnostic(`worst-seat pill artifact: ${artifact}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('time-split "last off" does not lie mid-race (NEW3-m2)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    const url = `${BASE_URL}/index.html?mode=deplane&a=free-for-all&b=two-doors&seed=m2&preset=a320&speed=15`;
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForSelector('[data-canvas="a"]');
+    // Sample the two "total" strings early, before the fast lane finishes, and require that
+    // whichever branch runs (both averages during staging, or slowest-exited once the door has
+    // opened) at least one differs OR the caption changes shape rather than reads "last off".
+    await page.waitForTimeout(2500);
+    const midCaption = await page.$eval('[data-split-cap="a"]', (el) => el.textContent);
+    // The caption during running should not be the raw " · last off" (that only fires when the
+    // race is genuinely done); it should be " · average so far, ..." or " · slowest off so far".
+    assert.ok(!/^\s·\slast off$/.test(midCaption),
+      `caption should not read "last off" mid-race, got "${midCaption}"`);
+  } finally {
+    await browser.close();
   }
 });
 

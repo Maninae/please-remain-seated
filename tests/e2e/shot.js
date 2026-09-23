@@ -13,7 +13,10 @@ import { chromium } from 'playwright';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
-const DEFAULT_URL = 'http://localhost:5197/index.html?mode=deplane&a=free-for-all&b=aisle-first&seed=smoke-1';
+// NEW3-M4: the site's first-visit default is free-for-all vs row-by-row (round-3 changed this
+// from aisle-first, which was a three-second coin flip). The screenshot utility mirrors that
+// so a fresh render shows what a visitor actually sees.
+const DEFAULT_URL = 'http://localhost:5197/index.html?mode=deplane&a=free-for-all&b=row-by-row&seed=smoke-1';
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 400, height: 800 };
 

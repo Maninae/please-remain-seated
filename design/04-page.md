@@ -26,7 +26,7 @@ One page, index.html. The hero is a race: two cabins, the same passengers and se
 - Finish moment: the finishing cabin's clock stops and bolds; the other keeps running; the margin appears. Optional seatbelt-chime "ding" via WebAudio, off by default, toggle in the control bar; nothing plays until the user turns it on.
 - Keyboard: space play/pause, R restart, 1-4 speeds, N new plane.
 - Shareable URL: ?mode=&a=&b=&seed=&preset=&load=&compliance=&families= round-trips every control. Controls persist in localStorage (try/catch; the page must render without it).
-- Presets for a first-time visitor: land on Deplane, A320, free-for-all vs aisle-first, auto-start at 15x so the page is alive within a second. Restart is one click.
+- Presets for a first-time visitor: land on Deplane, A320, free-for-all vs row-by-row, auto-start at 15x so the page is alive within a second. The two lanes differ from the first second (everyone standing versus one row standing) and the announced remain-seated policy loses by roughly two and a half times, which is the finding the site is named for. Two doors and aisle-first are one dropdown away. Restart is one click.
 
 ## Race mechanics
 

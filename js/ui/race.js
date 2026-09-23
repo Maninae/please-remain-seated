@@ -49,7 +49,7 @@ export function mountRace({ store, onFinish }) {
   const orientationRef = { current: () => currentOrientation };
   const follow = createFollowController({
     laneNodes, laneViews, laneSims, orientationRef,
-    onFollowChanged: () => { draw(); updateHeaders(); updateTimeSplit(); },
+    onFollowChanged: () => { draw(); updateHeaders(); updateTimeSplit(); updateSplitTargetUI(); },
   });
   const finishCtl = createFinishController({
     laneNodes, laneViews, laneSims, store, onFinish,
@@ -67,6 +67,9 @@ export function mountRace({ store, onFinish }) {
           }
         }
       }
+      // While one lane has finished and the other is still racing, feed the finish card the
+      // fresh "n to go" count so its provisional status line ticks down (NEW3-M4).
+      if (finishCtl.updateProvisionalStatus) finishCtl.updateProvisionalStatus();
     },
     onDraw: () => { draw(); updateHeaders(); updateTimeSplit(); },
   });
@@ -100,7 +103,7 @@ export function mountRace({ store, onFinish }) {
       if (kind !== 'last' && kind !== 'average') return;
       splitTarget = kind;
       follow.clear();
-      draw(); updateHeaders(); updateTimeSplit();
+      draw(); updateHeaders(); updateTimeSplit(); updateSplitTargetUI();
     },
     laneSims: () => laneSims.slice(),
     isBoardingFinished: () => store.state().mode === 'board' && loop.finished(0),
@@ -257,6 +260,7 @@ export function mountRace({ store, onFinish }) {
 
   function updateTimeSplit() {
     const lanes = [];
+    const followedTarget = follow.followId != null ? 'follow' : splitTarget;
     for (let i = 0; i < LANES.length; i += 1) {
       lanes.push({
         laneIndex: i,
@@ -267,12 +271,56 @@ export function mountRace({ store, onFinish }) {
         totalNode: document.querySelector(`[data-split-total="${LANES[i]}"]`),
         belowLabelsNode: document.querySelector(`[data-split-below="${LANES[i]}"]`),
         strategyLabel: labelForStrategy(currentStrategyIdForLane(i)),
-        target: splitTarget,
+        target: followedTarget,
         followId: follow.followId,
         followLane: follow.followLane,
       });
     }
     drawTimeSplitLanes({ lanes, mode: store.state().mode });
+  }
+
+  function updateSplitTargetUI() {
+    // Fix for NEW-m5 (round 2) / n3 (round 1): the Last/Average toggle used to keep its "Last"
+    // pip lit even while a passenger was being followed, and the subtitle still read "The last
+    // passenger. Click a dot on either cabin to follow one person." Both surfaces contradicted
+    // the follow line. Now: while a follow is active, both segments read as unchecked (a small
+    // `following` class on the group so CSS can dim them), and the subtitle names the followed
+    // seat plus how to unfollow. Clearing the follow restores the previous Last/Average state.
+    const subtitle = document.getElementById('time-split-subtitle');
+    const group = document.getElementById('split-target');
+    const following = follow.followId != null;
+
+    if (subtitle) {
+      if (following) {
+        const laneIndex = follow.followLane;
+        const sim = laneSims[laneIndex];
+        const passenger = sim ? sim.state.passengers.find((p) => p.id === follow.followId) : null;
+        const letter = passenger ? seatLetterFor(sim.state.cabin, passenger) : '';
+        const seat = passenger ? `seat ${passenger.row}${letter}` : 'one passenger';
+        subtitle.textContent = `Following ${seat} on the ${laneIndex === 0 ? 'left' : 'right'} cabin. Click the dot again to unfollow.`;
+      } else {
+        const noun = splitTarget === 'average' ? 'The average passenger' : 'The last passenger off';
+        const followHint = 'Click a dot on either cabin to follow one person.';
+        subtitle.textContent = `${noun}. ${followHint}`;
+      }
+    }
+    if (group) {
+      group.classList.toggle('following', following);
+      const buttons = group.querySelectorAll('.seg[data-split]');
+      for (const button of buttons) {
+        const kind = button.dataset.split;
+        const active = !following && kind === splitTarget;
+        button.setAttribute('aria-checked', String(active));
+        button.classList.toggle('on', active);
+      }
+    }
+  }
+
+  function seatLetterFor(cabin, passenger) {
+    if (cabin && cabin.columnInfo && cabin.columnInfo[passenger.col]) {
+      return cabin.columnInfo[passenger.col].letter;
+    }
+    return String.fromCharCode(65 + passenger.col);
   }
 
   // ---- selects, blurbs, deck ----
@@ -308,10 +356,12 @@ export function mountRace({ store, onFinish }) {
     const deck = document.getElementById('deck');
     if (!deck) return;
     // Fix for round-02 point 3: replace vague "why getting off takes forever" with the number the
-    // sim actually produces. The board-mode deck stays as the round-01-endorsed short line.
+    // sim actually produces. Board-mode deck was too generic in round-3 (NEW3-m3): now it carries
+    // a specific worst-seat number the sim actually produces, matching the deplane deck's thesis
+    // shape (a number, then the mechanism).
     deck.textContent = store.state().mode === 'deplane'
       ? 'The last person off spends six minutes on a plane they could walk out of in twenty seconds. One aisle, one lane, no overtaking.'
-      : 'Same people, same bags, two ways on.';
+      : 'The last passenger on spends twenty minutes stuck behind the aisle before they can sit down. Same people, same bags, two ways on.';
 
     // Legend copy differs by mode: deplaning shows "bag" (retrieval), boarding shows "stowing".
     const legend = document.querySelector('.cabin-card[data-lane="a"] .race-legend .swatch.bag');

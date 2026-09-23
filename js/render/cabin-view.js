@@ -42,6 +42,15 @@ const BAG_STROKE_PX = 0.6;
 const BAG_GLYPH_SIZE_FRACTION = 0.62;   // small bag glyph so amber ink stays scarce (m8)
 const WORST_SEAT_LABEL_FONT_PX = 11;
 const WORST_SEAT_LABEL_INSET_PX = 3;
+// Pill geometry for the worst-seat label callout (NEW3-M2). The pill is ink text on a paper
+// fill with a 1 px ink stroke: contrast comes from the stroke around the pill, not from a halo
+// stroked in the same colour as the fill (the round-3 bug that fattened every glyph into a
+// smear). Padding is asymmetric because Barlow's cap-height leaves visual air below the number.
+const WORST_SEAT_LABEL_PILL_PAD_X = 4;
+const WORST_SEAT_LABEL_PILL_PAD_Y = 2;
+const WORST_SEAT_LABEL_PILL_STROKE_PX = 1;
+const WORST_SEAT_LABEL_LEADER_STROKE_PX = 0.8;
+const WORST_SEAT_LABEL_LEADER_GAP_PX = 3;
 
 export function createCabinView(canvas, options = {}) {
   const orientation = options.orientation === 'vertical' ? 'vertical' : 'horizontal';
@@ -238,20 +247,79 @@ function drawHeatFills(ctx, g, heat) {
 }
 
 function drawWorstSeatLabel(ctx, g, heat) {
+  // Draw the worst-seat label as INK text on a small rounded paper pill with a 1 px ink stroke
+  // (NEW3-M2). The round-3 critic caught the prior version stroking a paper halo around paper
+  // text over a near-black heat fill: every glyph fattened into a smear. Here the pill fill and
+  // the seat fill contrast because the pill is always paper. Measured against the seat rect
+  // before drawing: if the pill fits inside with margin, it sits at seat-center; if not, it
+  // becomes a callout above the seat with a short ink leader down to the seat centre.
   if (!heat || !heat.worstKey || !heat.worstLabel) return;
   const seat = g.seats.find((s) => seatKey(s.row, s.col) === heat.worstKey);
   if (!seat) return;
   ctx.save();
   ctx.font = `600 ${WORST_SEAT_LABEL_FONT_PX}px ${THEME.fontFamily}`;
-  ctx.fillStyle = THEME.paper;
-  ctx.strokeStyle = THEME.paper;
-  ctx.lineWidth = 2.4;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
-  const cx = seat.x + Math.max(WORST_SEAT_LABEL_INSET_PX, seat.width * 0.08);
-  const cy = seat.y + seat.height / 2;
-  ctx.strokeText(heat.worstLabel, cx, cy);
-  ctx.fillText(heat.worstLabel, cx, cy);
+  const label = heat.worstLabel;
+  const textWidth = ctx.measureText(label).width;
+  const pillWidth = textWidth + WORST_SEAT_LABEL_PILL_PAD_X * 2;
+  const pillHeight = WORST_SEAT_LABEL_FONT_PX + WORST_SEAT_LABEL_PILL_PAD_Y * 2 + 1;
+  const pillRadius = pillHeight / 2;
+
+  // Prefer to sit the pill inside the seat rect, centred horizontally, if the pill fits with a
+  // 2 px margin on each side. Otherwise callout above the seat (or below if the seat is near
+  // the top of the canvas), with a short leader line landing at the seat centre.
+  const seatCenterX = seat.x + seat.width / 2;
+  const seatCenterY = seat.y + seat.height / 2;
+  const fitsInside = pillWidth + 2 * 2 <= seat.width && pillHeight + 2 * 2 <= seat.height;
+
+  let pillX;
+  let pillY;
+  let calloutFrom = null;
+  if (fitsInside) {
+    pillX = seatCenterX - pillWidth / 2;
+    pillY = seatCenterY - pillHeight / 2;
+  } else {
+    pillX = seatCenterX - pillWidth / 2;
+    // Try above first, then below.
+    const canvasCeiling = 2;
+    const canvasFloor = ctx.canvas.height / (window.devicePixelRatio || 1) - 2;
+    const wantAboveY = seat.y - pillHeight - WORST_SEAT_LABEL_LEADER_GAP_PX - 4;
+    if (wantAboveY >= canvasCeiling) {
+      pillY = wantAboveY;
+      calloutFrom = { x: seatCenterX, y: pillY + pillHeight };
+    } else {
+      pillY = seat.y + seat.height + WORST_SEAT_LABEL_LEADER_GAP_PX + 4;
+      if (pillY + pillHeight > canvasFloor) pillY = canvasFloor - pillHeight;
+      calloutFrom = { x: seatCenterX, y: pillY };
+    }
+    // Clamp pill horizontally into the canvas so the ink pill never gets clipped by the wrap.
+    const canvasRight = ctx.canvas.width / (window.devicePixelRatio || 1) - 2;
+    if (pillX < 2) pillX = 2;
+    if (pillX + pillWidth > canvasRight) pillX = canvasRight - pillWidth;
+  }
+
+  // Leader line first, so the pill body sits on top of the terminus.
+  if (calloutFrom) {
+    ctx.strokeStyle = THEME.ink;
+    ctx.lineWidth = WORST_SEAT_LABEL_LEADER_STROKE_PX;
+    ctx.beginPath();
+    ctx.moveTo(seatCenterX, seatCenterY);
+    ctx.lineTo(calloutFrom.x, calloutFrom.y);
+    ctx.stroke();
+  }
+
+  // Pill body: paper fill, ink stroke.
+  ctx.fillStyle = THEME.paper;
+  ctx.strokeStyle = THEME.ink;
+  ctx.lineWidth = WORST_SEAT_LABEL_PILL_STROKE_PX;
+  roundedRect(ctx, pillX, pillY, pillWidth, pillHeight, pillRadius);
+  ctx.fill();
+  ctx.stroke();
+
+  // Ink text on top.
+  ctx.fillStyle = THEME.ink;
+  ctx.fillText(label, pillX + WORST_SEAT_LABEL_PILL_PAD_X, pillY + pillHeight / 2);
   ctx.restore();
 }
 

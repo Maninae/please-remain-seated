@@ -28,7 +28,15 @@ import { PASSENGER_DEFAULTS } from './engine/config.js';
 const DEFAULTS = Object.freeze({
   mode: 'deplane',
   strategyA: DEFAULT_DEPLANE_STRATEGY_ID,
-  strategyB: 'aisle-first',
+  // Fix for NEW3-M4: the round-3 critic caught that the previous default (free-for-all vs
+  // aisle-first) was a 59/41 tie with a three-second median margin. Free-for-all vs row-by-row
+  // is the announced "please remain seated until the row ahead has left" policy losing by
+  // roughly two and a half times, which is the finding the site is named for. It also gives the
+  // two cabins visibly-different behaviour from t=0 (free-for-all: everyone stands; row-by-row:
+  // one row stands at a time), so the 45 s staging window is now a demonstration, not two
+  // identical stopped cabins. Two doors is one dropdown away and wins the compare chart, which
+  // is where its 2:20-median-margin belongs.
+  strategyB: 'row-by-row',
   boardStrategyA: DEFAULT_BOARD_STRATEGY_ID,
   boardStrategyB: 'steffen',
   presetId: DEFAULT_CABIN_PRESET_ID,
