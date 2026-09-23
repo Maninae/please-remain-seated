@@ -216,6 +216,8 @@ function samplePassenger(cabin, params, rng, seatInfo) {
     fare: 'main',
     status: 'none',
     preboard: false,
+    cardholder: false,
+    military: false,
     phase: null,
     vis: Vis.SEATED,
     aisleCell: null,

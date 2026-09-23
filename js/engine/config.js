@@ -128,21 +128,40 @@ export const PASSENGER_DEFAULTS = Object.freeze({
   // Boarding arrivals at the door: exponential inter-arrival, mean 3.7 s (Schultz baseline).
   doorInterArrivalMeanSeconds: 3.7,
 
-  // Frequent-flier status mix. Placeholder until the airline-research report lands; the airline
+  // Frequent-flier status mix on a typical US domestic flight (design/06-airline-research.md,
+  // "Cross-airline: sampling fractions"). Only ~10% of a mainline cabin holds any elite tier and
+  // top-tier is under 1% of the loyalty base, so the mix is 90 / 6 / 3 / 1. The airline
   // boarding strategies use these fractions to decide who boards in a "top / gold / silver"
-  // priority zone versus general boarding. The numbers here are order-of-magnitude sensible
-  // (a US mainline flight is roughly 68% no-status, 20% silver, 8% gold, 4% top-tier) and are
-  // marked placeholder in design/05-sections-and-airlines.md.
-  statusFractions: Object.freeze({ none: 0.68, silver: 0.20, gold: 0.08, top: 0.04 }),
+  // priority zone versus general boarding.
+  statusFractions: Object.freeze({ none: 0.90, silver: 0.06, gold: 0.03, top: 0.01 }),
 
   // Fraction of economy passengers on a "basic" fare that boards last regardless of status.
-  // Placeholder until research lands; roughly the industry basic-economy attach rate.
-  basicFareFraction: 0.30,
+  // Design/06-airline-research.md, "Basic economy share": trade-press estimates 15-30% of US
+  // domestic ticket volume, no primary source; picking the low end (0.20) because the survey
+  // aggregates include Spirit-style all-basic carriers that inflate the mainline number.
+  basicFareFraction: 0.20,
 
   // Fraction of the whole cabin that pre-boards (families with small children, wheelchair
   // assistance, unaccompanied minors). Pre-boarders board first regardless of strategy and their
-  // group-mates go with them. Placeholder until research lands.
-  preboardFraction: 0.04,
+  // group-mates go with them. Design/06-airline-research.md, "Pre-boarders": DOT requires
+  // airlines to pre-board self-identified disability but no aggregate number is published;
+  // practitioner estimates 3-8% of pax pre-board on typical US domestic flights, midpoint 5%.
+  preboardFraction: 0.05,
+
+  // Fraction of the cabin that holds a same-airline co-brand credit card and is called in the
+  // cardholder priority zone (Alaska C, AA 4, Delta 5-7, United 2, Southwest 5, JetBlue 3,
+  // Frontier 4, Air Canada 2). Estimate: many US mainline loyalty programs report co-brand
+  // penetration of a quarter to a third of premium-status members and a few percent of the
+  // general population; 0.25 of the whole cabin is on the high side but keeps the cardholder
+  // zone visible in the boarding order rather than getting swallowed by group inheritance.
+  cardholderFraction: 0.25,
+
+  // Fraction of the cabin that is active-duty military and eligible for military boarding
+  // courtesy (Alaska A, AA preboard courtesy, Delta preboard, United preboard, Southwest
+  // preboard, Frontier preboard, JetBlue courtesy). Estimate at 1%: US active-duty is ~0.4% of
+  // the population, but service members travel far more per capita than average and airlines
+  // extend the courtesy to Reserve/Guard on orders, so the on-cabin share ends up ~1%.
+  militaryFraction: 0.01,
 });
 
 // Fixed simulation step. Walking a 0.4 m cell at 0.8 m/s is 0.5 s, so 0.1 s resolves every timer.

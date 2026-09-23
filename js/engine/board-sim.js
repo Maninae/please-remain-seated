@@ -35,7 +35,9 @@ import { rowToCell, rowCellCount, cellToRow } from './cabin.js';
 import { createBins, placeBag, binAccessRow } from './bins.js';
 import { accountStep, createMetrics, sampleMetrics, summarizeMetrics } from './metrics.js';
 import { claimCell, releaseCell, moveCell, isCellEmpty } from './aisle.js';
-import { BOARD_STRATEGY_BY_ID } from './strategies/board.js';
+// Look up strategies via the combined registry so airline strategies (family: 'airline')
+// resolve the same way the nine textbook strategies do (family: 'textbook').
+import { BOARD_STRATEGY_BY_ID } from './strategies/index.js';
 import { applyStrategyOrder, interferenceKind, findBlockingRowmates } from './board-rules.js';
 
 export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng, seed }) {

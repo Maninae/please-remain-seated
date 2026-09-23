@@ -17,7 +17,10 @@
 import { runBatch, quantile, seedList } from '../js/batch.js';
 import { CABIN_PRESET_BY_ID, DEFAULT_CABIN_PRESET_ID } from '../js/engine/cabin-presets.js';
 import { DEPLANE_STRATEGIES } from '../js/engine/strategies/deplane.js';
-import { BOARD_STRATEGIES } from '../js/engine/strategies/board.js';
+// Use the combined registry so `--strategy all` in board mode picks up the family-tagged list
+// (nine textbook methods then fourteen airline strategies) and `--strategy airlines` can
+// filter to the airline family cleanly.
+import { BOARD_STRATEGIES } from '../js/engine/strategies/index.js';
 
 const STRATEGY_LIST_BY_MODE = { deplane: DEPLANE_STRATEGIES, board: BOARD_STRATEGIES };
 
@@ -39,12 +42,23 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node tools/simulate.mjs --mode deplane|board --strategy all|<id> --seeds 30 --preset a320
-                             [--compliance 0.85] [--groups 0.25] [--rear-door]`);
+  console.log(`Usage: node tools/simulate.mjs --mode deplane|board --strategy all|airlines|textbook|<id> --seeds 30 --preset a320
+                             [--compliance 0.85] [--groups 0.25] [--rear-door]
+
+Aliases in board mode: --strategy airlines (airline family only),
+                       --strategy textbook  (textbook family only).`);
   console.log(`\nDeplane strategies:`);
   for (const strat of DEPLANE_STRATEGIES) console.log(`  ${strat.id.padEnd(20)} ${strat.blurb}`);
-  console.log(`\nBoard strategies:`);
-  for (const strat of BOARD_STRATEGIES) console.log(`  ${strat.id.padEnd(20)} ${strat.blurb}`);
+  console.log(`\nBoard textbook methods:`);
+  for (const strat of BOARD_STRATEGIES) {
+    if (strat.family !== 'textbook') continue;
+    console.log(`  ${strat.id.padEnd(20)} ${strat.blurb}`);
+  }
+  console.log(`\nBoard airline strategies:`);
+  for (const strat of BOARD_STRATEGIES) {
+    if (strat.family !== 'airline') continue;
+    console.log(`  ${strat.id.padEnd(20)} ${strat.blurb}`);
+  }
 }
 
 function cabinOverridesFromPreset(preset, extraRearDoor) {
@@ -77,6 +91,16 @@ function chooseStrategies(args) {
   const list = STRATEGY_LIST_BY_MODE[args.mode];
   if (!list) throw new Error(`unknown mode: ${args.mode} (expected deplane|board)`);
   if (args.strategy === 'all') return list;
+  // Two family aliases for board mode: `--strategy airlines` runs the airline family only,
+  // `--strategy textbook` runs the nine textbook methods only. Deplane mode has no families.
+  if (args.strategy === 'airlines') {
+    if (args.mode !== 'board') throw new Error('`--strategy airlines` only applies to board mode');
+    return list.filter((strat) => strat.family === 'airline');
+  }
+  if (args.strategy === 'textbook') {
+    if (args.mode !== 'board') throw new Error('`--strategy textbook` only applies to board mode');
+    return list.filter((strat) => strat.family === 'textbook');
+  }
   const found = list.find((strat) => strat.id === args.strategy);
   if (!found) throw new Error(`unknown ${args.mode} strategy: ${args.strategy}`);
   return [found];
@@ -105,6 +129,7 @@ async function main() {
     rows.push({
       id: strat.id,
       label: strat.label,
+      family: strat.family ?? 'textbook',
       medianMin: result.median / 60,
       p10Min: result.p10 / 60,
       p90Min: result.p90 / 60,
@@ -112,9 +137,35 @@ async function main() {
     });
   }
 
-  printTable(rows, { preset, seeds: args.seeds, passengerOverrides, rearDoor: !!args.rearDoor });
+  const meta = { preset, seeds: args.seeds, passengerOverrides, rearDoor: !!args.rearDoor };
+  // In board mode with `--strategy all`, split textbook and airline families into two blocks
+  // so a reader can compare "how the literature says to board" vs "how airlines actually do it"
+  // without having to squint at the family column. Every other combination prints one table.
+  if (args.mode === 'board' && args.strategy === 'all') {
+    printFamilyBlocks(rows, meta);
+  } else {
+    printTable(rows, meta);
+  }
   const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(2);
   console.log(`\n(${strategies.length} ${strategies.length === 1 ? 'strategy' : 'strategies'}, ${args.seeds} seeds each, ${elapsedSeconds}s wall)`);
+}
+
+/**
+ * Print two grouped blocks for board mode: textbook methods, then airline strategies. Each has
+ * its own bold header so the reader immediately sees which family a strategy belongs to.
+ */
+function printFamilyBlocks(rows, meta) {
+  const textbook = rows.filter((row) => row.family === 'textbook');
+  const airline = rows.filter((row) => row.family === 'airline');
+  if (textbook.length > 0) {
+    console.log('== TEXTBOOK METHODS (what the literature proposes) ==');
+    printTable(textbook, meta);
+  }
+  if (airline.length > 0) {
+    if (textbook.length > 0) console.log('');
+    console.log('== AIRLINE STRATEGIES (how airlines actually board, 2026) ==');
+    printTable(airline, meta);
+  }
 }
 
 function printTable(rows, meta) {

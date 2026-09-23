@@ -14,10 +14,16 @@
  *   preboard      true for `preboardFraction` of passengers (families with small children,
  *                 wheelchair assistance). Pre-boarders board first regardless of strategy and
  *                 their group-mates go with them (handled by the airline strategies later).
+ *   cardholder    true for `cardholderFraction` of passengers. Same-airline co-brand credit
+ *                 card holders get their own zone on Alaska, AA, Delta, United, Southwest,
+ *                 JetBlue, Frontier and Air Canada; airline strategies read this flag.
+ *   military      true for `militaryFraction` of passengers. Active-duty military boards early
+ *                 on Alaska, AA, Delta, United, Southwest, Frontier and JetBlue (as courtesy).
  *
  * Every draw lives on its own fork so the existing per-passenger stream (bags, walk speed, prep,
  * yields, compliance, doorGap) stays bit-identical to what a single-section preset produced
- * before these fields existed. Group members share status, fare, and preboard after alignment.
+ * before these fields existed. Group members share status, fare, preboard, cardholder and
+ * military after alignment (a family PNR is called as one priority tier at the gate).
  */
 
 import { PASSENGER_DEFAULTS } from './config.js';
@@ -31,12 +37,19 @@ export function assignClassAndStatus(passengers, paramOverrides, cabin, classRng
   const statusCumulative = buildStatusCumulative(statusFractions);
   const basicFareFraction = params.basicFareFraction ?? PASSENGER_DEFAULTS.basicFareFraction;
   const preboardFraction = params.preboardFraction ?? PASSENGER_DEFAULTS.preboardFraction;
+  const cardholderFraction = params.cardholderFraction ?? PASSENGER_DEFAULTS.cardholderFraction;
+  const militaryFraction = params.militaryFraction ?? PASSENGER_DEFAULTS.militaryFraction;
   for (const passenger of passengers) {
     const section = cabin.sections[cabin.sectionsIndex.rowIndex.sectionByRow[passenger.row]];
     passenger.cabinClass = section.cabinClass;
     passenger.fare = resolveFare(section, passenger.row, cabin.premiumRows, basicFareFraction, classRng);
     passenger.status = drawStatus(classRng.next(), statusCumulative);
     passenger.preboard = classRng.next() < preboardFraction;
+    // Cardholder and military are drawn AFTER preboard so introducing them does not shift the
+    // status/preboard streams a pre-existing seed produced. Group members inherit them from the
+    // leader in alignGroupClassAndStatus, matching how a family PNR gets one priority zone.
+    passenger.cardholder = classRng.next() < cardholderFraction;
+    passenger.military = classRng.next() < militaryFraction;
   }
 }
 
@@ -92,6 +105,11 @@ export function alignGroupClassAndStatus(passengers) {
     passenger.status = leader.status;
     passenger.fare = leader.fare;
     passenger.preboard = leader.preboard;
+    // Cardholder and military are shared too: a family PNR is called as one priority zone at
+    // the gate, so if the leader qualifies for the co-brand or military courtesy the whole
+    // group boards with them.
+    passenger.cardholder = leader.cardholder;
+    passenger.military = leader.military;
   }
 }
 
