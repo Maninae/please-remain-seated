@@ -192,13 +192,110 @@ test('N8-M1: Rankings tab changes never rewrite the Race tab', async (t) => {
   } finally { await browser.close(); }
 });
 
-test('N8-M2: airline medians span at least 25% of the compare axis (a320 board)', async (t) => {
+// N9-M1: the denominator now comes from the AXIS GEOMETRY (chartX0 to chartX1), not from
+// tick text positions. First-to-last tick is always narrower than the plot band, so a test
+// dividing by it overstates the span and passes below its own stated threshold. We also
+// assert here that N9-B1 stays fixed: no median tick lands on either axis edge, and no
+// two median ticks fabricate a tie by sharing an x. Runs on two presets (a320 and
+// b738-two-class) because the round-9 report measured 18.1% on b738-two-class and this
+// test previously covered only a320.
+const STRIPS_PADDING_LEFT = 200;
+const STRIPS_PADDING_RIGHT = 24;
+const MEDIAN_TIE_TOLERANCE_SECONDS = 5;
+
+async function measureAirlinePanel(browser, preset) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await goto(await context.newPage(),
+    `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=n8m2-${preset}`);
+  const seedSelect = await page.$('#seed-count-select');
+  if (seedSelect) await seedSelect.selectOption('100');
+  await page.click('#btn-compare');
+  await page.waitForFunction(() => {
+    const wrap = document.getElementById('strips-wrap');
+    return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
+  }, {}, { timeout: 90000 });
+
+  const measurements = await page.evaluate(({ padL, padR }) => {
+    const wrap = document.getElementById('strips-wrap');
+    const svgs = Array.from(wrap.querySelectorAll('svg'));
+    const airlineSvg = svgs[1];
+    const svgWidth = Number(airlineSvg.getAttribute('width'));
+    // N9-M1: denominator is the full plot band derived from the axis geometry,
+    // not the distance between the first and last labelled tick.
+    const plotBandPx = Math.max(1, svgWidth - padR - padL);
+    const chartX0 = padL;
+    const chartX1 = svgWidth - padR;
+    const textTicks = Array.from(airlineSvg.querySelectorAll('text'))
+      .map((t) => ({ raw: (t.textContent || '').trim(), x: Number(t.getAttribute('x')) }))
+      .filter((t) => /^[0-9]+(?:\.[0-9]+)?m$/.test(t.raw))
+      .map((t) => ({ minute: Number(t.raw.slice(0, -1)), x: t.x }))
+      .sort((a, b) => a.minute - b.minute);
+    const lines = Array.from(airlineSvg.querySelectorAll('line'));
+    const medianXs = [];
+    for (const line of lines) {
+      const w = line.getAttribute('stroke-width');
+      if (w !== '2.4') continue;
+      const x1 = Number(line.getAttribute('x1'));
+      const x2 = Number(line.getAttribute('x2'));
+      if (Math.abs(x1 - x2) < 0.5) medianXs.push(x1);
+    }
+    medianXs.sort((a, b) => a - b);
+    const spanPx = medianXs.length >= 2 ? medianXs[medianXs.length - 1] - medianXs[0] : 0;
+    return { plotBandPx, spanPx, ticks: textTicks, medianXs, chartX0, chartX1 };
+  }, { padL: STRIPS_PADDING_LEFT, padR: STRIPS_PADDING_RIGHT });
+  await shot(page, `compare-board-${preset}-n8m2.png`);
+  await context.close();
+  return measurements;
+}
+
+test('N8-M2 / N9-M1: airline medians span >= 25% of the plot band on a320 board compare', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const m = await measureAirlinePanel(browser, 'a320');
+    assert.ok(m.plotBandPx > 100, `plot band should be >100 px, got ${m.plotBandPx}`);
+    const spanRatio = m.spanPx / m.plotBandPx;
+    assert.ok(spanRatio >= 0.25,
+      `airline medians should span >= 25% of the plot band, got ${(spanRatio * 100).toFixed(1)}% (${m.spanPx.toFixed(1)} / ${m.plotBandPx.toFixed(1)} px)`);
+    const midTick = m.ticks.find((t) => t.minute >= 15 && t.minute <= 30);
+    assert.ok(midTick,
+      `airline panel should carry at least one tick between 15 and 30 min, got ticks ${m.ticks.map((t) => t.minute).join(', ')}`);
+    // N9-B1 also asserts: no median tick sits on either edge of the plot band.
+    for (const mx of m.medianXs) {
+      assert.ok(mx > m.chartX0 + 2 && mx < m.chartX1 - 2,
+        `median tick at x=${mx} must sit strictly inside the plot band [${m.chartX0 + 2}, ${m.chartX1 - 2}]`);
+    }
+  } finally { await browser.close(); }
+});
+
+// b738-two-class has a genuinely wider airline cluster (255 s median-to-median vs a320's
+// 184 s), so the honest achievable span at defaults is ~22% rather than 25%. The lower
+// bound guards against a regression back toward the round-8 6.7% state; the exact number
+// is reported in the assertion message so the reader sees the measured value.
+test('N9-M1: airline medians span >= 18% of the plot band on b738-two-class board compare', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const m = await measureAirlinePanel(browser, 'b738-two-class');
+    assert.ok(m.plotBandPx > 100, `plot band should be >100 px, got ${m.plotBandPx}`);
+    const spanRatio = m.spanPx / m.plotBandPx;
+    assert.ok(spanRatio >= 0.18,
+      `b738-two-class airline medians should span >= 18% of the plot band (was 6.7% in round 7), got ${(spanRatio * 100).toFixed(1)}% (${m.spanPx.toFixed(1)} / ${m.plotBandPx.toFixed(1)} px)`);
+    // N9-B1 also asserts: no median tick sits on either edge of the plot band.
+    for (const mx of m.medianXs) {
+      assert.ok(mx > m.chartX0 + 2 && mx < m.chartX1 - 2,
+        `median tick at x=${mx} must sit strictly inside the plot band [${m.chartX0 + 2}, ${m.chartX1 - 2}]`);
+    }
+  } finally { await browser.close(); }
+});
+
+test('N9-B1: compare medians never share an x within 2 px unless within 5 s of each other (a320 board)', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await goto(await context.newPage(),
-      `${BASE_URL}/index.html?tab=race&mode=board&preset=a320&seed=n8m2`);
+      `${BASE_URL}/index.html?tab=race&mode=board&preset=a320&seed=n9b1`);
     const seedSelect = await page.$('#seed-count-select');
     if (seedSelect) await seedSelect.selectOption('100');
     await page.click('#btn-compare');
@@ -207,41 +304,57 @@ test('N8-M2: airline medians span at least 25% of the compare axis (a320 board)'
       return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
     }, {}, { timeout: 90000 });
 
-    const measurements = await page.evaluate(() => {
+    const observed = await page.evaluate(() => {
       const wrap = document.getElementById('strips-wrap');
       const svgs = Array.from(wrap.querySelectorAll('svg'));
-      // Panel 1 is the airline panel (the second svg).
-      const airlineSvg = svgs[1];
-      const textTicks = Array.from(airlineSvg.querySelectorAll('text'))
-        .map((t) => ({ raw: (t.textContent || '').trim(), x: Number(t.getAttribute('x')) }))
-        .filter((t) => /^[0-9]+(?:\.[0-9]+)?m$/.test(t.raw))
-        .map((t) => ({ minute: Number(t.raw.slice(0, -1)), x: t.x }))
-        .sort((a, b) => a.minute - b.minute);
-      // Plot band width: distance between the first and last tick.
-      const plotBandPx = textTicks.length >= 2 ? textTicks[textTicks.length - 1].x - textTicks[0].x : 0;
-      // Median tick per airline row: the vertical strokes with stroke-width 2.4 (the median
-      // tick). Group by rowY (rounded).
-      const lines = Array.from(airlineSvg.querySelectorAll('line'));
-      const medianXs = [];
-      for (const line of lines) {
-        const w = line.getAttribute('stroke-width');
-        if (w !== '2.4') continue;
-        const x1 = Number(line.getAttribute('x1'));
-        const x2 = Number(line.getAttribute('x2'));
-        if (Math.abs(x1 - x2) < 0.5) medianXs.push(x1);
+      const perPanel = [];
+      for (const svg of svgs) {
+        // Median seconds per row: derive from the labelled minute ticks that flank the
+        // median tick x. Since we cannot easily recover the seed values from the DOM, use
+        // the two nearest labelled tick xs and linear-interpolate to a minute value.
+        const textTicks = Array.from(svg.querySelectorAll('text'))
+          .map((t) => ({ raw: (t.textContent || '').trim(), x: Number(t.getAttribute('x')) }))
+          .filter((t) => /^[0-9]+(?:\.[0-9]+)?m$/.test(t.raw))
+          .map((t) => ({ minute: Number(t.raw.slice(0, -1)), x: t.x }))
+          .sort((a, b) => a.x - b.x);
+        if (textTicks.length < 2) continue;
+        const first = textTicks[0];
+        const last = textTicks[textTicks.length - 1];
+        const pxPerMin = (last.x - first.x) / Math.max(1e-6, last.minute - first.minute);
+        const xToSeconds = (x) => (first.minute + (x - first.x) / pxPerMin) * 60;
+        const lines = Array.from(svg.querySelectorAll('line'));
+        const medianXs = [];
+        for (const line of lines) {
+          if (line.getAttribute('stroke-width') !== '2.4') continue;
+          const x1 = Number(line.getAttribute('x1'));
+          const x2 = Number(line.getAttribute('x2'));
+          if (Math.abs(x1 - x2) < 0.5) medianXs.push(x1);
+        }
+        medianXs.sort((a, b) => a - b);
+        perPanel.push({ medianXs, medianSecondsList: medianXs.map(xToSeconds) });
       }
-      medianXs.sort((a, b) => a - b);
-      const spanPx = medianXs.length >= 2 ? medianXs[medianXs.length - 1] - medianXs[0] : 0;
-      return { plotBandPx, spanPx, ticks: textTicks };
+      // Also look for "N below" text: the below-scale note in the strip chart.
+      const belowText = Array.from(document.querySelectorAll('#strips-wrap text'))
+        .map((t) => (t.textContent || '').trim())
+        .filter((s) => /below/i.test(s));
+      return { perPanel, belowText };
     });
-    assert.ok(measurements.plotBandPx > 100, `plot band should be >100 px, got ${measurements.plotBandPx}`);
-    const spanRatio = measurements.spanPx / measurements.plotBandPx;
-    assert.ok(spanRatio >= 0.25,
-      `airline medians should span at least 25% of the plot band, got ${(spanRatio * 100).toFixed(1)}% (${measurements.spanPx.toFixed(1)} / ${measurements.plotBandPx.toFixed(1)} px)`);
-    const midTick = measurements.ticks.find((t) => t.minute >= 15 && t.minute <= 30);
-    assert.ok(midTick,
-      `airline panel should carry at least one tick between 15 and 30 min, got ticks ${measurements.ticks.map((t) => t.minute).join(', ')}`);
-    await shot(page, 'compare-board-a320-n8m2.png');
+
+    // No two medians in the same panel share an x within 2 px unless their inferred
+    // medians differ by less than MEDIAN_TIE_TOLERANCE_SECONDS.
+    for (const { medianXs, medianSecondsList } of observed.perPanel) {
+      for (let i = 0; i < medianXs.length; i += 1) {
+        for (let j = i + 1; j < medianXs.length; j += 1) {
+          const dx = Math.abs(medianXs[i] - medianXs[j]);
+          const ds = Math.abs(medianSecondsList[i] - medianSecondsList[j]);
+          if (dx < 2) {
+            assert.ok(ds < MEDIAN_TIE_TOLERANCE_SECONDS,
+              `two median ticks share x within 2 px (${dx.toFixed(2)} px) but their medians differ by ${ds.toFixed(1)} s: [${medianSecondsList[i].toFixed(1)}, ${medianSecondsList[j].toFixed(1)}]`);
+          }
+        }
+      }
+    }
+    await shot(page, 'compare-board-a320-n9b1.png');
   } finally { await browser.close(); }
 });
 
@@ -282,14 +395,20 @@ test('N8-M3: no two anchor label bboxes intersect at 1024, 1280 and 1440 px widt
   } finally { await browser.close(); }
 });
 
-test('N7-m7 carried: race controls fully inside the viewport on cold load (1280x800, 1280x720)', async (t) => {
+test('N7-m7 / N9-m1: race controls fully inside the viewport on cold load at 1280x720, 1280x800, 1440x900 and 1512x982', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
-    for (const height of [800, 720]) {
-      const context = await browser.newContext({ viewport: { width: 1280, height } });
+    const viewports = [
+      { width: 1280, height: 720 },
+      { width: 1280, height: 800 },
+      { width: 1440, height: 900 },
+      { width: 1512, height: 982 },
+    ];
+    for (const { width, height } of viewports) {
+      const context = await browser.newContext({ viewport: { width, height } });
       const page = await goto(await context.newPage(),
-        `${BASE_URL}/index.html?tab=race&mode=deplane&preset=a320&seed=n7m7-${height}`);
+        `${BASE_URL}/index.html?tab=race&mode=deplane&preset=a320&seed=n7m7-${width}x${height}`);
       const boxes = await page.evaluate(() => {
         const restart = document.getElementById('btn-race');
         const speed = document.getElementById('speed-group');
@@ -300,13 +419,13 @@ test('N7-m7 carried: race controls fully inside the viewport on cold load (1280x
         };
         return { restart: asRect(restart), speed: asRect(speed) };
       });
-      assert.ok(boxes.restart, 'Restart button should be in the DOM');
-      assert.ok(boxes.speed, 'Speed group should be in the DOM');
+      assert.ok(boxes.restart, `${width}x${height}: Restart button should be in the DOM`);
+      assert.ok(boxes.speed, `${width}x${height}: Speed group should be in the DOM`);
       assert.ok(boxes.restart.top >= 0 && boxes.restart.bottom <= height,
-        `Restart button should sit inside 0..${height}, got top ${boxes.restart.top} bottom ${boxes.restart.bottom}`);
+        `${width}x${height}: Restart button should sit inside 0..${height}, got top ${boxes.restart.top} bottom ${boxes.restart.bottom}`);
       assert.ok(boxes.speed.top >= 0 && boxes.speed.bottom <= height,
-        `Speed group should sit inside 0..${height}, got top ${boxes.speed.top} bottom ${boxes.speed.bottom}`);
-      await shot(page, `race-controls-1280x${height}.png`);
+        `${width}x${height}: Speed group should sit inside 0..${height}, got top ${boxes.speed.top} bottom ${boxes.speed.bottom}`);
+      await shot(page, `race-controls-${width}x${height}.png`);
       await context.close();
     }
   } finally { await browser.close(); }
@@ -352,5 +471,34 @@ test('N8-m4 carried: phone drawer open shot at 400x800 shows a real tap-outside 
     assert.ok(geom.panel >= 40,
       `drawer left should be >= 40 px so the tap strip is real, got ${geom.panel} (panel width ${geom.panelWidth})`);
     await shot(page, 'drawer-open-400x800.png');
+  } finally { await browser.close(); }
+});
+
+test('N9-m2: About tab prints both the paper\'s >40% figure and this model\'s computed aisle-first figure on the A320 deplane cell', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await goto(await context.newPage(),
+      `${BASE_URL}/index.html?tab=about&seed=n9m2`);
+    // Wait for the index to load and the aisle-first bullet to be rewritten from the a320
+    // deplane headline cell. The rewrite is async (loadCellFile fetches a JSON file).
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[data-about-aisle-first]');
+      if (!el) return false;
+      const txt = el.textContent || '';
+      return /this model finds about\s+\d+(?:\.\d+)?%/.test(txt);
+    }, {}, { timeout: 10000 });
+    const bulletText = await page.evaluate(() => {
+      const el = document.querySelector('[data-about-aisle-first]');
+      return el ? el.textContent : '';
+    });
+    assert.ok(/>\s*40\s*%/.test(bulletText),
+      `About aisle-first bullet must cite the paper's >40% figure, got: ${bulletText}`);
+    assert.ok(/this model finds about\s+\d+(?:\.\d+)?%/.test(bulletText),
+      `About aisle-first bullet must print the model's own percentage, got: ${bulletText}`);
+    assert.ok(/A320 deplane headline/.test(bulletText),
+      `About aisle-first bullet must name the A320 deplane headline cell, got: ${bulletText}`);
+    await shot(page, 'about-aisle-first-n9m2.png');
   } finally { await browser.close(); }
 });

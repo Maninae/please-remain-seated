@@ -208,8 +208,24 @@ function pbLine(pbResult, winnerLabel) {
   return '';
 }
 
+// N9-n3: the share link describes ONE race. It should not carry the seven `r*` Rankings
+// URL keys (rmode, rpreset, rload, rcomply, rgroups, rbags, rbins), which the Race tab
+// does not read on load and which double the URL's length. Strip them before copying, so
+// the shared link is what the reader thinks it is.
+const RANKINGS_URL_KEYS = Object.freeze(['rmode', 'rpreset', 'rload', 'rcomply', 'rgroups', 'rbags', 'rbins']);
+
+function shareableRaceUrl() {
+  try {
+    const url = new URL(window.location.href);
+    for (const key of RANKINGS_URL_KEYS) url.searchParams.delete(key);
+    return url.toString();
+  } catch (error) {
+    return window.location.href;
+  }
+}
+
 function copyLink(button) {
-  const url = window.location.href;
+  const url = shareableRaceUrl();
   const done = () => {
     const original = button.textContent;
     button.textContent = 'Link copied';

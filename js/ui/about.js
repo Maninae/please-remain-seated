@@ -86,7 +86,10 @@ const ASSUMPTION_ROWS = Object.freeze([
   {
     label: 'One-column (aisle-first) deplaning claim',
     value: 'aisle-first faster than free-for-all',
-    source: 'Wald, Harmon and Klabjan 2014, JATM 36:101-109 (structured deplaning >40% reduction), doi 10.1016/j.jairtraman.2014.01.001',
+    // N9-m2: cite the paper's ">40%" and this model's own figure in one sentence, plus the
+    // one-clause reason for the gap. The About Limits list carries the same fact as a bullet
+    // computed live from the a320 deplane headline cell.
+    source: 'Wald, Harmon and Klabjan 2014, JATM 36:101-109 (structured deplaning >40% reduction), doi 10.1016/j.jairtraman.2014.01.001. This model finds ~4% at default settings on the A320 deplane headline cell; the defaults (0.85 compliance, 25% family groups, row-pair aisle) blur the strict order and let seat-mates retrieve bags in parallel.',
     kind: 'measured',
   },
   {
@@ -156,6 +159,9 @@ export function mountAboutTab({ getGenerationInfo }) {
     // caveat under the ranked chart quotes (the a320 board headline cell). The two tabs
     // then agree on this sentence rather than contradicting each other on the number.
     refreshBackToFrontBullet(event.detail?.indexObject || null);
+    // Round-09 N9-m2: same treatment for the aisle-first claim so the site reports its own
+    // number next to the paper's ">40%".
+    refreshAisleFirstBullet(event.detail?.indexObject || null);
   });
   return { rerender: () => panel.replaceChildren(buildAbout()) };
 }
@@ -306,6 +312,7 @@ function buildLimitsSection() {
       <li>The jet-bridge queue past a fixed service time per passenger.</li>
       <li>Airline announcements' effect on compliance (that is baked into the "Follow the rules" slider).</li>
       <li data-about-back-to-front>Back to front, in zones, boards slower on the sim than the MythBusters back-to-front field test. Treat the extremes of the ranking as extrapolation rather than result.</li>
+      <li data-about-aisle-first>Wald, Harmon and Klabjan 2014 report a >40% reduction from structured (aisle-first) deplaning; this model shows a much smaller gap at default settings. The 45-second door-open window is the same for both strategies, 0.85 compliance and 25% family groups blur the strict aisle-first order, and the row-pair aisle already lets seat-mates retrieve bags in parallel.</li>
     </ul>
   `;
   return section;
@@ -331,6 +338,41 @@ async function refreshBackToFrontBullet(indexObject) {
   if (!bullet) return;
   const mytRate = MYTHBUSTERS_BACK_TO_FRONT_RATE_PAX_PER_MIN;
   bullet.textContent = `Back to front, in zones, runs about ${rate.toFixed(1)} pax/min in the sim on the A320 board default, against ~${mytRate} pax/min in the MythBusters back-to-front field test. Treat the extremes of the ranking as extrapolation rather than result.`;
+}
+
+/**
+ * Patch the aisle-first Limits bullet with the same reduction figure computed from the a320
+ * deplane headline cell (free-for-all vs aisle-first). Round-09 N9-m2: the site cited Wald,
+ * Harmon and Klabjan's >40% figure in the assumptions table but never reported what this
+ * model itself delivers under the same comparison. Now the two numbers sit in one sentence,
+ * with one clause on why they differ.
+ */
+async function refreshAisleFirstBullet(indexObject) {
+  if (!indexObject || !Array.isArray(indexObject.cells)) return;
+  const target = indexObject.cells.find((cell) => (
+    cell.mode === 'deplane' && cell.preset === 'a320' && (cell.kind || 'headline') === 'headline'
+  ));
+  if (!target || !target.file) return;
+  let cellData = null;
+  try { cellData = await loadCellFile(target.file); } catch (error) { return; }
+  const bullet = document.querySelector('[data-about-aisle-first]');
+  if (!bullet) return;
+  const strategies = Array.isArray(cellData?.strategies) ? cellData.strategies : [];
+  const freeForAll = strategies.find((row) => row.id === 'free-for-all');
+  const aisleFirst = strategies.find((row) => row.id === 'aisle-first');
+  const freeSeconds = freeForAll ? freeForAll.medianSeconds : null;
+  const aisleSeconds = aisleFirst ? aisleFirst.medianSeconds : null;
+  if (!Number.isFinite(freeSeconds) || !Number.isFinite(aisleSeconds) || freeSeconds <= 0) return;
+  const reductionPct = ((freeSeconds - aisleSeconds) / freeSeconds) * 100;
+  const paperFigure = '>40%';
+  bullet.textContent = `Wald, Harmon and Klabjan 2014 report a ${paperFigure} reduction from structured (aisle-first) deplaning; this model finds about ${reductionPct.toFixed(1)}% at default settings (aisle-first ${formatClock(aisleSeconds)} vs free-for-all ${formatClock(freeSeconds)} on the A320 deplane headline cell). The 45-second door-open window is the same for both strategies, 0.85 compliance and 25% family groups blur the strict aisle-first order, and this model's row-pair aisle already lets seat-mates retrieve bags in parallel.`;
+}
+
+function formatClock(seconds) {
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total - m * 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
 function buildParagraphSection() {

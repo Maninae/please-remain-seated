@@ -73,9 +73,12 @@ export function renderStrips(host, series, options = {}) {
   const chartWidth = Math.max(1, chartX1 - chartX0);
   const scaleRange = Math.max(1, paddedMax - paddedMin);
   const projectSeconds = (seconds) => chartX0 + Math.min(1, Math.max(0, (seconds - paddedMin) / scaleRange)) * chartWidth;
-  // N7-m2: track off-scale rows (dots past paddedMax) so we can mark them explicitly at the
-  // right edge instead of silently clamping. Same standard as the ranked chart's break mark.
+  // N7-m2 / N9-B1: track dots past the cap AND dots below the floor so both truncations
+  // are counted and marked explicitly at the axis edges. Dots that fall outside the window
+  // are NOT drawn (a pileup on the edge would fabricate a cluster that is not in the data);
+  // the reader sees "N off scale" on the right and "N below scale" on the left instead.
   let offScaleCount = 0;
+  let belowFloorCount = 0;
 
   if (options.title) {
     // Round-05: pin the title to the LEFT edge so the finding sentence uses the full chart
@@ -129,7 +132,12 @@ export function renderStrips(host, series, options = {}) {
     const jitterH = STRIPS_ROW_HEIGHT * STRIPS_JITTER_HEIGHT_FRACTION;
     for (let d = 0; d < values.length; d += 1) {
       const rawValue = values[d];
-      if (rawValue > paddedMax) offScaleCount += 1;
+      // N9-B1: values outside the [paddedMin, paddedMax] window count into the edge marks
+      // and are NOT drawn. Piling clamped dots on the axis edge fabricates a cluster the
+      // data does not carry; a single "N below scale" glyph is honest, a slab of stacked
+      // dots is not.
+      if (rawValue > paddedMax) { offScaleCount += 1; continue; }
+      if (rawValue < paddedMin) { belowFloorCount += 1; continue; }
       const x = projectSeconds(rawValue);
       const y = rowY + jitterFor(s.id || s.label || '', d) * jitterH;
       appendCircle(svg, {
@@ -167,6 +175,25 @@ export function renderStrips(host, series, options = {}) {
       'font-style': 'italic',
     }, `${offScaleCount} off scale`);
   }
+  // N9-B1: mirror the off-scale mark at the low end. The dashed floor tick is already drawn
+  // by drawStripsAxis when paddedMin > 0; we replace its "axis starts at Xm" label with a
+  // combined "N below · axis starts at Xm" so the reader sees the count and the truncation
+  // in one label. When paddedMin is 0 (no floor), belowFloorCount is 0 by construction.
+  if (paddedMin > 0) {
+    const axisY = paddingTop - 6;
+    const minuteMin = paddedMin / 60;
+    const floorText = belowFloorCount > 0
+      ? `${belowFloorCount} below · axis starts at ${formatMinutes(minuteMin)}m`
+      : `axis starts at ${formatMinutes(minuteMin)}m`;
+    appendText(svg, {
+      x: chartX0, y: axisY - 16,
+      'font-size': STRIPS_AXIS_FONT_PX,
+      'text-anchor': 'start',
+      fill: THEME.ink,
+      'fill-opacity': 0.5,
+      'font-style': 'italic',
+    }, floorText);
+  }
   return svg;
 }
 
@@ -194,22 +221,15 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
       'fill-opacity': 0.55,
     }, `${formatMinutes(m)}m`);
   }
-  // N6-m1: when the axis starts above zero, mark the floor explicitly so a reader sees the
-  // scale is truncated, not miscalibrated. The caller reserved 14 px above the axis for the
-  // note (paddingTop = STRIPS_PADDING_TOP + 14 when paddedMin > 0).
+  // N6-m1 / N9-B1: when the axis starts above zero, draw a dashed break tick so the reader
+  // sees the scale is truncated. The italic label ("axis starts at Xm", or "N below · axis
+  // starts at Xm" when there is a below-floor count) is drawn by the caller after the row
+  // loop, so it can include the below-floor count from the same pass.
   if (paddedMin > 0) {
     appendLine(svg, {
       x1: x0, x2: x0, y1: axisY - 5, y2: axisY + 5,
       stroke: THEME.rule, 'stroke-width': 0.8, 'stroke-dasharray': '2 2',
     });
-    appendText(svg, {
-      x: x0, y: axisY - 16,
-      'font-size': STRIPS_AXIS_FONT_PX,
-      'text-anchor': 'start',
-      fill: THEME.ink,
-      'fill-opacity': 0.5,
-      'font-style': 'italic',
-    }, `axis starts at ${formatMinutes(minuteMin)}m`);
   }
 }
 
@@ -219,11 +239,10 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
  * airline in board mode) project the same minutes onto the same pixel scale.
  *
  * Round-08 N8-M2: cap the axis around the row medians (not around the union max) so the
- * tightest cluster is legible. Both the FLOOR and the CAP come from the medians rather than
- * the raw seeds; the p10 raises the leading edge past the fastest textbook tail and the p85
- * with a small margin holds most of the airline cluster comfortably. Rows past the cap or
- * below the floor surface as broken bars through the existing offScaleCount path (which
- * fires now that niceCeiling of the cap no longer envelops every drawn value).
+ * tightest cluster is legible. Round-09 N9-B1: the floor is bounded above by the smallest
+ * median (floor = min(p10 of medians, min median) minus a margin), so no median ever gets
+ * clamped onto the axis edge. Individual seed values below the floor surface as a
+ * "N below scale" mark at the left edge, mirroring the "N off scale" mark on the right.
  */
 export function computeSharedStripsAxis(seriesList) {
   const allValues = [];
@@ -242,19 +261,30 @@ export function computeSharedStripsAxis(seriesList) {
     }
   }
   if (allValues.length === 0) return { axisMinSeconds: 0, axisMaxSeconds: 60 };
-  // p85 of the medians gives a cap that just barely covers most of the airline cluster and
-  // pushes the slowest front-to-back tail off-scale (where it becomes an "N off scale"
-  // mark). If we only have a handful of series, back off to the max so a two-row compare
-  // still shows everything.
+  // Cap sits just above the middle of the airline cluster: p75 of the medians pushes the
+  // slowest one or two airline medians and the far-tail front-to-back row off-scale (where
+  // they become an "N off scale" mark on the right edge). Round-08 used p85 * 1.05 with a
+  // floor of p10-of-medians, which fit the whole airline band inside but reserved most of
+  // the frame for the fastest textbook row; the round-09 floor rule (below) has to include
+  // that row, so a tighter cap is what preserves a legible airline span on cabins whose
+  // airline cluster is naturally wide (b738-two-class spans 25-29 min).
   const rawCap = medians.length >= 6
-    ? percentile(medians, 0.85) * 1.05
+    ? percentile(medians, 0.75)
     : Math.max(...allValues);
   const axisMaxSeconds = niceCeiling(rawCap);
-  // Floor from the medians p10 too: raise the leading edge above the fastest textbook tail
-  // so the airline cluster (which sits three or four minutes above p10) actually spans the
-  // frame instead of clumping near the right edge. Fall back to the raw-seed floor when
-  // there aren't enough medians to trust a percentile.
-  const floorSourceValues = medians.length >= 6 ? [percentile(medians, 0.1)] : allValues;
+  // Floor rule (N9-B1): guarantee the floor sits at or below the smallest MEDIAN so no
+  // median row ever draws as a clamped tick on the axis edge. Take the smaller of
+  // p10-of-medians and the min median as the reference, then let computeStripsFloor apply
+  // the breather and nice-minute snap. When we have only a handful of series, fall back to
+  // the raw-seed floor (which is naturally below every median).
+  let floorSourceValues;
+  if (medians.length >= 6) {
+    const minMedian = Math.min(...medians);
+    const p10OfMedians = percentile(medians, 0.1);
+    floorSourceValues = [Math.min(minMedian, p10OfMedians)];
+  } else {
+    floorSourceValues = allValues;
+  }
   const axisMinSeconds = computeStripsFloor(floorSourceValues, axisMaxSeconds);
   return { axisMinSeconds, axisMaxSeconds };
 }
@@ -285,7 +315,11 @@ function computeStripsFloor(allValues, paddedMax) {
   const breather = Math.max(15, (paddedMax - minVal) * 0.05);
   const raw = Math.max(0, minVal - breather);
   const minutes = raw / 60;
-  const step = minutes >= 20 ? 5 : minutes >= 10 ? 2 : minutes >= 5 ? 1 : minutes >= 1 ? 0.5 : 0.25;
+  // N9-B1: keep the 1 min step through the 10-20 minute band. The floor now sits at
+  // min(p10 of medians, min median) minus a small breather; a 2-min step used to snap a
+  // 13.2 m raw floor down to 12 m, which widened the plot band and dropped the airline
+  // span to under 25% on the a320 board compare.
+  const step = minutes >= 20 ? 5 : minutes >= 5 ? 1 : minutes >= 1 ? 0.5 : 0.25;
   return Math.floor(minutes / step) * step * 60;
 }
 

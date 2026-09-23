@@ -34,7 +34,7 @@ export const GLOSSARY = Object.freeze({
   },
   'aisle-first': {
     title: 'Aisle seats first',
-    body: 'Everyone in an aisle seat leaves before the middle seats stand, and the window seats wait until the middles are gone. Nobody has to climb over anyone else.',
+    body: 'Everyone in an aisle seat leaves before the middle seats stand, and the window seats wait until the middles are gone. Nobody has to climb over anyone else. Wald, Harmon and Klabjan 2014 report a >40% reduction from structured deplaning; this model finds about 4% at default settings (aisle-first ~6:09 vs free-for-all ~6:24 on the A320 deplane headline cell), because the defaults use 0.85 compliance and 25% family groups (which blur the strict order) and a row-pair aisle that already lets seat-mates retrieve bags in parallel.',
   },
   'alternating-rows': {
     title: 'Every other row',

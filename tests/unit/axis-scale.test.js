@@ -19,8 +19,10 @@ test('niceCeiling: snaps to the next ladder step with a 2% breathing pad', () =>
   assert.equal(niceCeiling(21 * 60), 22 * 60, '21 min snaps to 22 min via the fine ladder');
   // A data point exactly at a ladder value still earns the next step because of the 2% pad.
   assert.equal(niceCeiling(22 * 60), 25 * 60, '22 min padded 2% snaps to 25 min');
-  // 6.5 minutes snaps to 8 (fine ladder) rather than 10.
-  assert.equal(niceCeiling(6.5 * 60), 8 * 60, '6.5 min snaps to 8 min');
+  // 6.5 minutes snaps to 7 min via the round-09 N9-n2 fine ladder (was 8 with the coarser
+  // ladder that skipped 4, 6, 7, 9). The finer ladder trims the E175 deplane cap dead
+  // frame from 18% to 7%.
+  assert.equal(niceCeiling(6.5 * 60), 7 * 60, '6.5 min snaps to 7 min');
 });
 
 test('niceCeiling: 58 min band caps at 60 min (ladder covers 60 explicitly)', () => {

@@ -55,11 +55,16 @@ test('quantile: linear interpolation between neighbours', () => {
   assert.equal(quantile([7], 0.9), 7);
 });
 
+/**
+ * Round-09 N9-n2 note: the ladder was densified with 4, 6, 7 and 9 so a small-cap panel
+ * (E175 deplane at ~6.5 min) does not jump to 8 or 10. The two updated lines below reflect
+ * that: 8 min padded 2% snaps to 9 (was 10), and 14 min padded 2% still snaps to 15.
+ */
 test('niceCeiling rounds up to a friendly minute count', () => {
   // The shared axis-scale module uses the fine ladder N6-m9 introduced for the sensitivity
   // panels: 8, 10, 12, 15, 18, 20, 22, 25, 28, 30. 8-and-a-hair min snaps to 10 (padded
   // just past 8); 14 min snaps to 15; 22 min snaps to 25 (padded past 22).
-  assert.equal(niceCeiling(60 * 8), 600);       // 8 min padded 2% -> 10 min
+  assert.equal(niceCeiling(60 * 8), 540);       // 8 min padded 2% -> 9 min (fine ladder)
   assert.equal(niceCeiling(60 * 14), 900);      // 14 min -> 15 min
   assert.equal(niceCeiling(60 * 22), 1500);     // 22 min padded -> 25 min
   assert.equal(niceCeiling(0), 60);

@@ -66,7 +66,7 @@ Walking speed, bag stow and retrieval time, seat-interference movement counts, a
 |---|---|
 | Walking speed, bag stow time (Weibull), door outflow (23 pax/min median) | Schultz, [Field Trial Measurements to Validate a Stochastic Aircraft Boarding Model](https://doi.org/10.3390/aerospace5010027), Aerospace 5(1):27, 2018 |
 | Seat-interference movement counts | Schultz, [Consideration of Passenger Interactions](https://doi.org/10.3390/aerospace5040101), Aerospace 5(4):101, 2018 |
-| Structured (one-column, aisle-first) deplaning claim | Wald, Harmon & Klabjan, [JATM 36:101-109](https://www.sciencedirect.com/science/article/abs/pii/S0969699714000027), 2014 ([doi 10.1016/j.jairtraman.2014.01.001](https://doi.org/10.1016/j.jairtraman.2014.01.001)) |
+| Structured (one-column, aisle-first) deplaning claim | Wald, Harmon & Klabjan, [JATM 36:101-109](https://www.sciencedirect.com/science/article/abs/pii/S0969699714000027), 2014 ([doi 10.1016/j.jairtraman.2014.01.001](https://doi.org/10.1016/j.jairtraman.2014.01.001)) reports a >40% reduction from structured deplaning; this model finds about 4% at default settings (aisle-first ~6:09 vs free-for-all ~6:24 on the A320 deplane headline cell), because 0.85 compliance and 25% family groups blur the strict order and the row-pair aisle already lets seat-mates retrieve bags in parallel. |
 | Boarding-method ordering (Steffen fastest, back-to-front slowest) | Steffen, [JATM 14(3)](https://arxiv.org/abs/0802.0733), 2008; Steffen & Hotchkiss, [JATM 18(1)](https://arxiv.org/abs/1108.5211), 2012 |
 | Random / WILMA / open-seating boarding times | [MythBusters episode 222](https://mythresults.com/airplane-boarding), 2014 |
 
