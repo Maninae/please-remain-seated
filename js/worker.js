@@ -1,17 +1,22 @@
 /**
- * Compare-batch worker. One worker handles one strategy at a time so the compare pool can fan
- * strategies out across `navigator.hardwareConcurrency` workers.
+ * Compare-batch worker. Each worker runs ONE shard at a time so the compare pool can fan
+ * shards (a strategy + a seed chunk) across `navigator.hardwareConcurrency` workers.
  *
  * Protocol (page -> worker):
- *   { type: 'run', id, mode, strategyId, label, seeds, cabinOverrides, passengerOverrides }
+ *   { type: 'run', id, shardId, mode, strategyId, label,
+ *     seeds, cabinOverrides, passengerOverrides }
  *   { type: 'cancel', id }
  *
  * Protocol (worker -> page):
- *   { type: 'progress', id, done, total }          per completed seed inside the run
- *   { type: 'result', id, strategyId, label,
- *     totalSeconds: number[], median, p10, p90 }   when the strategy's seeds all finish
+ *   { type: 'progress', id, shardId, done, total } per completed seed inside the shard
+ *   { type: 'result', id, shardId, strategyId, label,
+ *     totalSeconds: number[], median, p10, p90 }   when the shard's seeds all finish
  *   { type: 'cancelled', id }                      in response to a cancel that hit this worker
- *   { type: 'error', id, message }                 on failure
+ *   { type: 'error', id, shardId, message }        on failure
+ *
+ * The worker echoes the `shardId` it was given so the pool can slot per-chunk results back
+ * into the correct (strategy, chunk) position regardless of completion order. Determinism
+ * across shards is the pool's job; determinism within a shard rides on runBatch.
  *
  * The caller is responsible for merging strategy-level `cabinOverrides` (two-doors setting
  * `rearDoor`) into the flat `cabinOverrides` it posts here, exactly as race-sims does per lane.
@@ -33,7 +38,7 @@ self.addEventListener('message', (event) => {
     return;
   }
   if (message.type !== 'run') return;
-  const { id, mode, strategyId, label, seeds, cabinOverrides, passengerOverrides } = message;
+  const { id, shardId, mode, strategyId, label, seeds, cabinOverrides, passengerOverrides } = message;
   activeRunId = id;
   cancelled = false;
   try {
@@ -42,17 +47,17 @@ self.addEventListener('message', (event) => {
       cabinOverrides, passengerOverrides,
       onProgress: (done, total) => {
         if (cancelled) return;
-        self.postMessage({ type: 'progress', id, done, total });
+        self.postMessage({ type: 'progress', id, shardId, done, total });
       },
     });
     if (cancelled) return;
     self.postMessage({
       type: 'result',
-      id, strategyId, label,
+      id, shardId, strategyId, label,
       totalSeconds: batch.totalSeconds,
       median: batch.median, p10: batch.p10, p90: batch.p90,
     });
   } catch (error) {
-    self.postMessage({ type: 'error', id, message: String(error && error.message || error) });
+    self.postMessage({ type: 'error', id, shardId, message: String(error && error.message || error) });
   }
 });

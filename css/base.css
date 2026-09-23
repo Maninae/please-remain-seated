@@ -435,3 +435,85 @@ label { color: var(--ink-soft); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* -------- Phone tap targets (N6-m6) ---------------------------------------
+ *
+ * WCAG 2.5.5 Level AAA and the round-06 critic ask for a 44 CSS-px hit area on every
+ * interactive control at phone width. The base rules leave several controls narrower
+ * (segmented pips at 32 px, the chime checkbox at 16 px, the finish-card action buttons
+ * at 40 px, selects at 32 px), so bump them here in one place instead of hunting them
+ * across five files.
+ *
+ * The info-anchor (`.info-btn`) already carries a 44 px `::after` hit area on coarse
+ * pointers via sidebar.css. Phones report `pointer:coarse` in every mainstream browser,
+ * so those buttons are covered without touching their visible circle size; a documented
+ * exception in the e2e test skips their 22 px bounding box.
+ *
+ * Fine-pointer devices at 400 px viewport are the awkward middle: a laptop with a tiny
+ * window. The exception list covers them too.
+ */
+@media (max-width: 899px) {
+  /* Every segmented pip (mode toggles, speed group, time-split Last/Average, rankings
+   * mode toggle) gets a 44 px minimum. Base rule was 32 px; the masthead override was
+   * already 44 but this catches every remaining group in one line. */
+  .segmented .seg {
+    min-height: var(--tap);
+    min-width: var(--tap);
+  }
+
+  /* The Last/Average pips were shrunk to 4x10 padding + 12 px font; give them the tap
+   * spec while keeping the visual language (small font, tight padding around the label). */
+  .time-split .toggle-row .segmented .seg {
+    padding: 6px 12px;
+    min-height: var(--tap);
+    min-width: var(--tap);
+  }
+
+  /* Every native <select> jumps to 44 px on phone. Aircraft / bins / seed-count and the
+   * rankings preset select all inherit from here. */
+  select {
+    min-height: var(--tap);
+    padding: 10px 30px 10px 12px;
+  }
+
+  /* Every plain <button> (Cancel, New plane, more-knobs summary label pips) gets a 44 px
+   * min. The button base rule sits at 36 px. Anything more specific (info-btn) still wins
+   * because of its own explicit width/height. */
+  button {
+    min-height: var(--tap);
+  }
+
+  /* Heat toggle: the base rule uses padding, no min-height. */
+  .heat-toggle {
+    min-height: var(--tap);
+    min-width: var(--tap);
+  }
+
+  /* Chime checkbox: the tap target is the <label>, which triggers the input from anywhere
+   * inside it. Keep the visible 16 px checkbox and grow the label to 44 px on phone. The
+   * input itself is a documented exception in the e2e test (its bounding box stays 16 px). */
+  .checkbox-label {
+    min-height: var(--tap);
+    padding: 6px 4px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Finish-card action buttons: base was 40 px, spec is 44. */
+  .finish-card .actions button {
+    min-height: var(--tap);
+  }
+
+  /* Text inputs (the seed field): base is 32 px, sidebar overrides to 36 px. */
+  input[type="text"], input[type="number"] {
+    min-height: var(--tap);
+  }
+  .page-side .seed-row-side input[type="text"] {
+    min-height: var(--tap);
+  }
+
+  /* Race-controls seed-row text input (the top-level control): base at 40 px, spec 44. */
+  .race-controls .seed-row input[type="text"] {
+    min-height: var(--tap);
+  }
+}

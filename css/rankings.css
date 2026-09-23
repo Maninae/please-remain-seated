@@ -463,3 +463,92 @@
   font-family: var(--font-body);
   word-break: break-all;
 }
+
+/* ----- Rankings-tab settings sidebar (N6-m7) --------------------------------
+ *
+ * A compact settings column that only offers grid values. The race sidebar is a peer widget
+ * inside the race tab-panel; on the rankings tab we render this one instead so the tab has
+ * its own knobs without inflating the race sidebar into a cross-tab component.
+ *
+ * Desktop (>= 900 px): the sidebar sits to the right of the main rankings column via a
+ * flex row, so a wide reader has both the chart and the knobs on screen at once.
+ * Phone (< 900 px): the sidebar collapses to a full-width block above the sensitivity
+ * grid (since it comes after every other rankings section in the DOM).
+ */
+.rankings-settings {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
+  background: var(--paper-2);
+  padding: 12px 14px;
+  align-self: start;
+  margin-top: var(--gap-m);
+}
+.rankings-settings-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-s);
+}
+.rankings-settings-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+.rankings-settings-lede {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.rankings-settings-knobs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rankings-settings .rankings-knob {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rankings-settings .rankings-knob-head {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rankings-settings .rankings-knob select {
+  width: 100%;
+}
+
+@media (min-width: 900px) {
+  #tab-panel-rankings {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    column-gap: var(--gap-xl);
+    max-width: var(--page-max);
+    margin: 0 auto;
+    padding-right: var(--page-side);
+    padding-left: var(--page-side);
+    box-sizing: border-box;
+  }
+  #tab-panel-rankings > .rankings-tab {
+    grid-column: 1;
+    padding-left: 0;
+    padding-right: 0;
+    max-width: none;
+    margin: 0;
+  }
+  #tab-panel-rankings > .rankings-settings {
+    grid-column: 2;
+    margin-top: var(--gap-l);
+    position: sticky;
+    top: 16px;
+    align-self: start;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
+}

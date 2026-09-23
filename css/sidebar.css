@@ -147,7 +147,9 @@
 .page-side .seed-row-side input[type="text"] {
   grid-column: 2;
   grid-row: 2;
-  min-height: 36px;
+  /* Round-10 N6-m6: phone tap target is 44 px (the drawer is a phone-only surface, so no
+   * separate desktop rule is needed). */
+  min-height: var(--tap);
   font-size: 13px;
   width: 100%;
 }

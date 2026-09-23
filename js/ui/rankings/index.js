@@ -25,6 +25,7 @@ import { renderStatTiles } from './rankings-stats.js';
 import { renderSensitivitySlopes } from './rankings-sensitivity.js';
 import { anchorsFor } from './rankings-anchors.js';
 import { createInfoButton } from '../info-popover.js';
+import { mountRankingsSettings } from './rankings-settings.js';
 import {
   BOARD_STRATEGIES,
 } from '../../engine/strategies/index.js';
@@ -48,6 +49,9 @@ export function mountRankingsTab({ store }) {
 
   buildScaffold(panel);
   wireControls(panel, store, () => rerender());
+  // Rankings-settings sidebar: grid-only knobs, injected inside the rankings-tab section.
+  // The settings module reads the loaded index to populate its <select> options.
+  const settings = mountRankingsSettings({ panel, store });
 
   window.addEventListener('prs:tab-changed', (event) => {
     const { tab } = event.detail || {};
@@ -77,6 +81,8 @@ export function mountRankingsTab({ store }) {
     state.preview = result.preview;
     state.loaded = true;
     setStatus(panel, '');
+    // Hand the grid to the settings sidebar so it can populate its selects.
+    settings.updateFromIndex(result.indexObject);
     // Populate the preset select for the CURRENT mode so a mode toggle never lists a
     // preset that mode cannot answer. rerender() re-populates this whenever the mode
     // changes.

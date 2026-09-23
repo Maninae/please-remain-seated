@@ -381,6 +381,33 @@ export const GLOSSARY = Object.freeze({
     body: 'The three sliders decide the share of passengers with no bag, one bag, or two bags in the overhead bin. Bag pulls and stows are the slowest single action on the plane, so this dial matters a lot.',
     learnMore: RESEARCH_LINK,
   },
+
+  /*
+   * Rankings-tab knob popovers (N6-m7). The rankings tab needs precomputed cells at exactly
+   * the knob values it renders, so its knob selects are restricted to the grid. Each
+   * `-grid` variant of a race-tab knob says so plainly.
+   */
+  'how-full-grid': {
+    title: 'How full the plane is',
+    body: 'The fraction of seats that have a person in them. Grid values only: pick from the precomputed load levels. The race tab lets any value between 40 percent and 100 percent, but the Rankings tab needs a cell that was actually simulated at that setting.',
+  },
+  'follow-the-rules-grid': {
+    title: 'How well people follow the rules',
+    body: 'How much of the announced order people actually go along with. Grid values only: pick from the precomputed compliance levels. The race tab is continuous, but a ranked chart needs a cell we have already run.',
+  },
+  'groups-grid': {
+    title: 'Groups travelling together',
+    body: 'The share of passengers travelling with someone. Grid values only: pick from the precomputed values.',
+  },
+  'carry-ons-grid': {
+    title: 'Carry-ons',
+    body: 'Grid values only: pick from the precomputed bag mixes. "Typical" is the default carry-on distribution, "light" tilts toward no bag, "heavy" tilts toward two bags. The race tab lets you set the three shares directly; the Rankings tab needs one of the precomputed mixes.',
+  },
+  'overhead-bins-grid': {
+    title: 'Overhead bins',
+    body: 'Grid values only. Roomy new-generation bins fit a bag per seat; old-style bins fit fewer. Every cell was run at exactly one of these two.',
+  },
+
   runs: {
     title: 'Runs',
     body: 'The compare chart runs every strategy this many times, each with a different random seed, and shows the range of results. More runs means a more reliable answer at the cost of waiting a few more seconds.',
