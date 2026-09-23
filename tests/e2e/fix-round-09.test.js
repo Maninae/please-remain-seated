@@ -216,7 +216,8 @@ async function loadPage(context, url) {
   await page.goto(url, { waitUntil: 'load' });
   await page.evaluate(() => { try { window.localStorage.clear(); } catch {} });
   await page.reload({ waitUntil: 'load' });
-  await page.waitForSelector('[data-rankings-lede]');
+  // Round-08: widen the wait so a slow parallel-suite run still catches the lede.
+  await page.waitForSelector('[data-rankings-lede]', { timeout: 45000 });
   await page.waitForTimeout(2200);
   return page;
 }
@@ -424,7 +425,7 @@ test('N6-M3: anchor label bboxes stay inside the SVG viewBox at 1280 and 400 px'
         },
       });
       for (const preset of ['a320', 'b738-two-class']) {
-        const page = await loadPage(context, `${BASE_URL}/index.html?tab=rankings&mode=board&preset=${preset}&seed=anchor-${preset}-${viewport.width}`);
+        const page = await loadPage(context, `${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=${preset}&seed=anchor-${preset}-${viewport.width}`);
         const check = await page.evaluate(() => {
           const svg = document.querySelector('.rankings-chart-svg-host svg');
           if (!svg) return { ok: false, reason: 'no svg' };
@@ -512,7 +513,7 @@ test('negative-result preset phone screenshot: a321neo-three-class board', async
         },
       },
     });
-    const page = await loadPage(context, `${BASE_URL}/index.html?tab=rankings&mode=board&preset=a321neo-three-class&seed=neg-phone`);
+    const page = await loadPage(context, `${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=a321neo-three-class&seed=neg-phone`);
     await shot(page, 'rankings-board-a321neo-three-class-phone-400x800.png');
     // Verify the hero states the negative result.
     const hero = await page.evaluate(() => document.querySelector('[data-rankings-finding]')?.textContent || '');

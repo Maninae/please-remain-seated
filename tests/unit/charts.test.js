@@ -56,9 +56,12 @@ test('quantile: linear interpolation between neighbours', () => {
 });
 
 test('niceCeiling rounds up to a friendly minute count', () => {
-  assert.equal(niceCeiling(60 * 8), 600);       // 8 min -> 10 min
+  // The shared axis-scale module uses the fine ladder N6-m9 introduced for the sensitivity
+  // panels: 8, 10, 12, 15, 18, 20, 22, 25, 28, 30. 8-and-a-hair min snaps to 10 (padded
+  // just past 8); 14 min snaps to 15; 22 min snaps to 25 (padded past 22).
+  assert.equal(niceCeiling(60 * 8), 600);       // 8 min padded 2% -> 10 min
   assert.equal(niceCeiling(60 * 14), 900);      // 14 min -> 15 min
-  assert.equal(niceCeiling(60 * 22), 1800);     // 22 min -> 30 min
+  assert.equal(niceCeiling(60 * 22), 1500);     // 22 min padded -> 25 min
   assert.equal(niceCeiling(0), 60);
 });
 
@@ -86,7 +89,10 @@ test('renderStrips: one group per series', () => {
 
 test('renderStrips: the median tick x matches the numeric median', () => {
   const svg = makeStub('svg');
-  const values = [60, 120, 180, 240, 300];   // median 180
+  // Values chosen so the fastest dot lands under the round-08 floor gates (min < 30s AND
+  // min < 10% of cap) so the axis floors to 0. That keeps the arithmetic a straight
+  // proportion of paddedMax across ladder-step changes.
+  const values = [20, 120, 180, 240, 300];   // median 180, min 20s (< 30 → floor 0)
   renderStrips(svg, [{ id: 'only', label: 'Only', values }], { width: 800 });
   const medianSeconds = 180;
   const paddedMax = niceCeiling(300);

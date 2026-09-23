@@ -185,29 +185,33 @@ function pickMatchingOption(select, target) {
 
 /** Read the store's value for a knob in grid vocabulary. */
 function valueForKnob(state, knob) {
-  if (knob === 'load') return state.loadFactor;
-  if (knob === 'compliance') return state.compliance;
-  if (knob === 'groups') return state.families;
-  if (knob === 'bags') return bagsFromShares(state.bagP0, state.bagP1, state.bagP2);
-  if (knob === 'bins') return state.bins === 'space' ? 'roomy' : state.bins;
+  // Round-08 N8-M1: read from the rankings slice so the Rankings sidebar reflects the
+  // rankings knobs, not whatever the Race tab is set to.
+  if (knob === 'load') return state.rankingsLoadFactor;
+  if (knob === 'compliance') return state.rankingsCompliance;
+  if (knob === 'groups') return state.rankingsFamilies;
+  if (knob === 'bags') return bagsFromShares(state.rankingsBagP0, state.rankingsBagP1, state.rankingsBagP2);
+  if (knob === 'bins') return state.rankingsBins === 'space' ? 'roomy' : state.rankingsBins;
   return null;
 }
 
-/** Write a knob's grid choice back to the store. */
+/** Write a knob's grid choice back to the rankings slice. */
 function writeKnobToStore(store, knob, value) {
   if (knob === 'load') {
-    store.update({ loadFactor: Number(value) });
+    store.update({ rankingsLoadFactor: Number(value) });
   } else if (knob === 'compliance') {
-    store.update({ compliance: Number(value) });
+    store.update({ rankingsCompliance: Number(value) });
   } else if (knob === 'groups') {
-    store.update({ families: Number(value) });
+    store.update({ rankingsFamilies: Number(value) });
   } else if (knob === 'bags') {
     const shares = sharesFromBags(value);
-    if (shares) store.update({ bagP0: shares[0], bagP1: shares[1], bagP2: shares[2] });
+    if (shares) store.update({
+      rankingsBagP0: shares[0], rankingsBagP1: shares[1], rankingsBagP2: shares[2],
+    });
   } else if (knob === 'bins') {
     // The store uses 'space' for the roomy default and 'legacy' for old-style. The grid
     // uses 'roomy' and 'legacy'; translate here.
-    store.update({ bins: value === 'roomy' ? 'space' : value });
+    store.update({ rankingsBins: value === 'roomy' ? 'space' : value });
   }
 }
 

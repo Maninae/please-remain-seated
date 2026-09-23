@@ -123,22 +123,28 @@ test('N7-M1: front-to-back caveat verdict word tracks the sim rate', async (t) =
     // the real precompute needed.
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     await serveTwoCaveatFixtures(context);
+    // Round-08 N8-M4: the caveat clause fires only on narrowbodies (where the MythBusters
+    // anchor is drawn), so the "fast sim" fixture uses b738-hd (a real narrowbody) rather
+    // than the widebody b789 the earlier round assumed. The fixture cell still has a
+    // back-to-front row whose derived rate is well above 7 pax/min.
     const page = await goto(await context.newPage(),
-      `${BASE_URL}/index.html?tab=rankings&mode=board&preset=b789-three-class&seed=m1-faster`);
+      `${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=b738-hd&seed=m1-faster`);
     const caveatFaster = await page.evaluate(() =>
       document.querySelector('[data-rankings-chart-caveat]')?.textContent || '');
-    assert.match(caveatFaster, /Front-to-back runs faster here/i,
+    // Round-08 N8-B1: the caveat now names the row it actually quotes (the back-to-front
+    // row, which the chart labels "Back to front, in zones"), not the front-to-back row.
+    assert.match(caveatFaster, /Back to front, in zones runs faster here/i,
       `on the fast-sim preset the caveat should say "faster", got "${caveatFaster}"`);
-    assert.doesNotMatch(caveatFaster, /Front-to-back runs slower here/i,
+    assert.doesNotMatch(caveatFaster, /Back to front, in zones runs slower here/i,
       `on the fast-sim preset the caveat should NOT say "slower", got "${caveatFaster}"`);
     await shot(page, 'rankings-board-b789-caveat-faster.png');
     await page.close();
 
     const pageSlow = await goto(await context.newPage(),
-      `${BASE_URL}/index.html?tab=rankings&mode=board&preset=a320&seed=m1-slower`);
+      `${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=a320&seed=m1-slower`);
     const caveatSlower = await pageSlow.evaluate(() =>
       document.querySelector('[data-rankings-chart-caveat]')?.textContent || '');
-    assert.match(caveatSlower, /Front-to-back runs slower here/i,
+    assert.match(caveatSlower, /Back to front, in zones runs slower here/i,
       `on the slow-sim preset the caveat should say "slower", got "${caveatSlower}"`);
     await shot(pageSlow, 'rankings-board-a320-caveat-slower.png');
   } finally { await browser.close(); }
@@ -156,7 +162,9 @@ test('N7-M2: Rankings tab writes mode/preset/knobs to the URL on change', async 
     await page.click('button[data-rankings-mode="board"]');
     await page.waitForTimeout(1200);
     const urlAfterMode = page.url();
-    assert.match(urlAfterMode, /[?&]mode=board(&|$)/, `URL should carry mode=board after toggle, got ${urlAfterMode}`);
+    // Round-08 N8-M1: the rankings tab writes to r-prefixed URL keys so a Rankings toggle
+    // never rewrites the Race tab's mode. Assert `rmode=board`, not `mode=board`.
+    assert.match(urlAfterMode, /[?&]rmode=board(&|$)/, `URL should carry rmode=board after toggle, got ${urlAfterMode}`);
     // Change the preset select to a different aircraft that has cells.
     const presetTarget = await page.evaluate(() => {
       const sel = document.getElementById('rankings-preset-select');
@@ -170,12 +178,14 @@ test('N7-M2: Rankings tab writes mode/preset/knobs to the URL on change', async 
       await page.selectOption('#rankings-preset-select', presetTarget);
       await page.waitForTimeout(1400);
       const urlAfterPreset = page.url();
-      assert.match(urlAfterPreset, new RegExp(`[?&]preset=${presetTarget}(&|$)`),
-        `URL should carry preset=${presetTarget} after change, got ${urlAfterPreset}`);
+      // Round-08 N8-M1: preset writes go to `rpreset`, not `preset`.
+      assert.match(urlAfterPreset, new RegExp(`[?&]rpreset=${presetTarget}(&|$)`),
+        `URL should carry rpreset=${presetTarget} after change, got ${urlAfterPreset}`);
     }
     // Load a rankings URL with a non-default preset and knob and assert the provenance
-    // footnote matches. Loading URL: load knob to 0.7.
-    await page.goto(`${BASE_URL}/index.html?tab=rankings&mode=board&preset=a320&load=0.7&seed=m2-roundtrip`, { waitUntil: 'load' });
+    // footnote matches. `rload` is the rankings-slice knob; the r-prefixed URL round-trips
+    // the rankings state on cold load.
+    await page.goto(`${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=a320&rload=0.7&seed=m2-roundtrip`, { waitUntil: 'load' });
     await page.waitForTimeout(2200);
     const footnoteText = await page.evaluate(() =>
       document.querySelector('[data-rankings-footnote]')?.textContent || '');
@@ -248,12 +258,12 @@ async function serveTwoCaveatFixtures(context) {
   const knobs = { load: 0.85, compliance: 0.85, groups: 0.25, bags: 'default', bins: 'roomy' };
   const filenameFor = (mode, preset) =>
     `${mode}__${preset}__load=0.85__comply=0.85__groups=0.25__bags=default__bins=roomy__n=${seeds}.json`;
-  // For the "faster" preset (b789 three-class): pax=258, target b2f rate ~13 pax/min.
-  // 258 pax / 13 pax/min = 19.85 min = 1191 s.
-  const fasterCell = buildCaveatCell('b789-three-class', {
-    passengerCount: 258, backToFrontSec: 1191, textbookSec: 720,
-    airlineSecs: [1240, 1260, 1280, 1300, 1320, 1340, 1360, 1380, 1400, 1420, 1440, 1460, 1480, 1500],
-    randomSec: 1500,
+  // For the "faster" preset (b738-hd, a narrowbody with the MythBusters anchor drawn):
+  // pax=200, target b2f rate ~13 pax/min → 200 / 13 * 60 = 923s.
+  const fasterCell = buildCaveatCell('b738-hd', {
+    passengerCount: 200, backToFrontSec: 923, textbookSec: 660,
+    airlineSecs: [1000, 1020, 1040, 1060, 1080, 1100, 1120, 1140, 1160, 1180, 1200, 1220, 1240, 1260],
+    randomSec: 1150,
   }, seeds);
   // For the "slower" preset (a320): pax=153, target b2f rate ~5.9 pax/min → 153/5.9=25.93 min=1556s.
   const slowerCell = buildCaveatCell('a320', {
@@ -262,7 +272,7 @@ async function serveTwoCaveatFixtures(context) {
     randomSec: 1200,
   }, seeds);
   const cells = [
-    metaCell('board', 'b789-three-class', knobs, seeds),
+    metaCell('board', 'b738-hd', knobs, seeds),
     metaCell('board', 'a320', knobs, seeds),
   ];
   const index = {
@@ -274,11 +284,11 @@ async function serveTwoCaveatFixtures(context) {
     },
     strategyCountByMode: { deplane: 3, board: 12 },
     seedTiers: { headline: 10000, small: 2000, sensitivity: 2000, preview: 200 },
-    namedHeadlinePresets: ['a320', 'b789-three-class'],
+    namedHeadlinePresets: ['a320', 'b738-hd'],
     sensitivityPresets: [], sensitivityFactors: [], cells,
   };
   await context.route(/\/data\/rankings\/[^/]+\.json$/, (route) => route.fulfill({ status: 404, body: '' }));
-  await context.route(new RegExp(`\\/data\\/rankings\\/${filenameFor('board', 'b789-three-class').replace(/\./g, '\\.')}$`),
+  await context.route(new RegExp(`\\/data\\/rankings\\/${filenameFor('board', 'b738-hd').replace(/\./g, '\\.')}$`),
     (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(fasterCell) }));
   await context.route(new RegExp(`\\/data\\/rankings\\/${filenameFor('board', 'a320').replace(/\./g, '\\.')}$`),
     (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(slowerCell) }));
@@ -300,7 +310,7 @@ function buildCaveatCell(preset, spec, seeds) {
   const pax = spec.passengerCount;
   const strategies = [
     row('reverse-pyramid', 'Reverse pyramid', 'textbook', spec.textbookSec, pax, seeds),
-    row('back-to-front', 'Back to front', 'textbook', spec.backToFrontSec, pax, seeds),
+    row('back-to-front', 'Back to front, in zones', 'textbook', spec.backToFrontSec, pax, seeds),
     row('random', 'Random order', 'textbook', spec.randomSec, pax, seeds),
   ];
   const airlineLabels = [

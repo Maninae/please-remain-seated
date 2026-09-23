@@ -1,11 +1,11 @@
 # Research: measured boarding and deplaning parameters
 
-Literature values the simulator's defaults are drawn from. Every number carries its source. Compiled 2026-09-22.
+Literature values the simulator's defaults are drawn from. Every number carries its source.
 
 ## Per-passenger micro-timings (boarding models)
 
 - Aisle free-walking speed 0.8 m/s, uniform across agents in Schultz's stochastic cellular automaton. (Schultz, "Field Trial Measurements to Validate a Stochastic Aircraft Boarding Model", Aerospace 5(1):27, 2018, https://doi.org/10.3390/aerospace5010027)
-- Cellular-automaton cell 0.4 x 0.4 m; minimum inter-passenger spacing 0.4 m (one cell). (Salari et al., arXiv:2007.16021, 2020, https://arxiv.org/html/2007.16021)
+- Cellular-automaton cell 0.4 x 0.4 m; minimum inter-passenger spacing 0.4 m (one cell). (Schultz 2018, aerospace5010027, section 2.1 (Model))
 - Bag stow time: 323 field-trial stow events fit Weibull with shape k = 1.7 and scale lambda = 16 s (mean ~14.3 s, median ~13 s). (Schultz 2018, aerospace5010027)
 - Going from 0 to 2 carry-ons lengthens total boarding by ~60%. (Nyquist & McFadden, JATM 14(4):197-204, 2008, https://www.sciencedirect.com/science/article/abs/pii/S0969699708000513)
 - Steffen treats luggage stowing as the dominant cost, ~10-15 s per passenger with luggage. (Steffen, JATM 14(3), 2008, https://arxiv.org/abs/0802.0733)
@@ -19,7 +19,7 @@ Literature values the simulator's defaults are drawn from. Every number carries 
 
 - Steffen 2008 simulation: optimal Steffen ~4x faster than back-to-front. (Steffen 2008)
 - Steffen & Hotchkiss mock-757 field test (12 rows, 72 pax): Steffen 3:36, back-to-front 6:11, block 6:54. (JATM 18(1):64-67, 2012, https://arxiv.org/abs/1108.5211)
-- MythBusters episode 222 (173 seats): back-to-front 24:29, random assigned 17:15, WILMA 14:55, WILMA + blocks 15:07, open seating 14:07, reverse pyramid 15:10. (2012, https://mythresults.com/airplane-boarding)
+- MythBusters episode 222 (173 seats): back-to-front 24:29, random assigned 17:15, WILMA 14:55, WILMA + blocks 15:07, open seating 14:07, reverse pyramid 15:10. (aired 21 August 2014, https://mythresults.com/airplane-boarding)
 - Reverse pyramid at America West saved ~2 min (~20%) on full A319/A320. (Van den Briel et al., Interfaces 35(3):191-201, 2005)
 - Steffen with most-bags-first is fastest and lowest variance. (Qiang et al., JATM 40:42-47, 2014, https://www.sciencedirect.com/science/article/abs/pii/S096969971400074X)
 - Slow-passengers-first cuts boarding ~13% vs random in the Lorentzian model. (Erland et al., PRE 100:062313, 2019, https://arxiv.org/abs/1906.05018)
@@ -29,7 +29,7 @@ Literature values the simulator's defaults are drawn from. Every number carries 
 ## Deplaning
 
 - Door outflow in the first minute: Q0.25 = 18, median = 23, Q0.75 = 29 pax/min. 91% of flights finish deboarding by 8 min; deplaning is ~53% faster than boarding on the same fleet. (Schultz 2018, aerospace5010027)
-- Structured deplaning: >40% reduction on full aircraft; ~30% average saving estimated at ~27M passenger-minutes or ~$2B per year in the US. Recommended for domestic high-load flights: one-column (aisle column front to back, then middle, then window). (Wald, Harmon & Klabjan, "Structured deplaning via simulation and optimization", JATM 36:101-109, 2014, doi 10.1016/j.jairtraman.2014.01.001, https://www.sciencedirect.com/science/article/abs/pii/S0969699714000027)
+- Structured deplaning: >40% reduction on full aircraft. Recommended for domestic high-load flights: one-column (aisle column front to base, then middle, then window). The paper reports the >40% figure on their simulated benchmarks; broader industry-wide totals in passenger-minutes or dollars are not quantified in the primary source and are not carried here. (Wald, Harmon & Klabjan, "Structured deplaning via simulation and optimization", JATM 36:101-109, 2014, doi 10.1016/j.jairtraman.2014.01.001, https://www.sciencedirect.com/science/article/abs/pii/S0969699714000027)
 - Lorentzian-geometry treatment of column-wise exit, similar order of gains. (Bachmat et al., "Deplaning", 2013, https://www.academia.edu/4621663/Deplaning)
 - Stand plus collect personal item: 1-2 s. (Unverified; not confirmed against a primary source. Retained as a modelling assumption; see the assumptions table on the About tab.)
 - Retrieve a bag from the bin: ~9-14 s per bag, the Schultz stow distribution reversed. (derived)

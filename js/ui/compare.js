@@ -197,6 +197,14 @@ export function mountCompare({ store, race }) {
         axisMaxSeconds: sharedAxis.axisMaxSeconds,
       });
 
+      // A single caption BETWEEN the two panels (round-08 N8-n8: the previous version
+      // appended it after both panels while the code comment said "between"). The reader
+      // is not left inferring the shared scale from tick labels alone.
+      const sharedCaption = document.createElement('p');
+      sharedCaption.className = 'compare-shared-scale';
+      sharedCaption.textContent = 'Both panels share this scale.';
+      stripsWrap.appendChild(sharedCaption);
+
       const rule = document.createElement('div');
       rule.className = 'compare-group-rule';
       stripsWrap.appendChild(rule);
@@ -208,13 +216,6 @@ export function mountCompare({ store, race }) {
         axisMinSeconds: sharedAxis.axisMinSeconds,
         axisMaxSeconds: sharedAxis.axisMaxSeconds,
       });
-
-      // A single caption between the two panels saying so, so the reader is not left
-      // inferring shared scale from tick labels alone. Matches the wording the heat ramp uses.
-      const sharedCaption = document.createElement('p');
-      sharedCaption.className = 'compare-shared-scale';
-      sharedCaption.textContent = 'Both panels share this scale.';
-      stripsWrap.appendChild(sharedCaption);
     }
 
     const totalRows = textbookResults.length + airlineResults.length;

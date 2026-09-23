@@ -135,6 +135,31 @@
   .about-table { display: block; overflow-x: auto; }
 }
 
+/* Round-08 N8-m7: legend for the assumption-table encodings. Each swatch inherits the
+ * style of the row-kind it names, so the code reads at a glance instead of by trial. */
+.about-assumptions-key {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.7;
+}
+.about-assumptions-key .key-swatch {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--paper-2) 40%, transparent);
+  margin: 0 1px;
+}
+.about-assumptions-key .key-swatch[data-kind="assumption"] { color: var(--ink); font-style: italic; }
+.about-assumptions-key .key-swatch[data-kind="estimate"] { color: var(--ink-soft); font-style: italic; }
+.about-assumptions-key .key-swatch[data-kind="derived"] { color: var(--ink-soft); }
+.about-assumptions-key .key-swatch[data-kind="measured"] { color: var(--ink); font-weight: 600; }
+.about-assumptions-key .key-swatch[data-kind="demonstration"] {
+  color: var(--ink-soft);
+  font-style: italic;
+  text-decoration: underline dotted color-mix(in oklab, var(--rule) 65%, transparent);
+  text-underline-offset: 3px;
+}
+
 .about-airlines {
   display: grid;
   grid-template-columns: 1fr 1fr;

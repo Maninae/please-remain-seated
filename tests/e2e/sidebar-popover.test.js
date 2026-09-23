@@ -153,10 +153,13 @@ test('drawer opens and closes at 400 px with focus trapped', async (t) => {
     assert.equal(afterClose.ariaExpanded, 'false', 'open button reports aria-expanded=false');
     assert.equal(afterClose.focused, 'btn-open-settings', 'focus returns to the open button');
 
-    // Tap outside closes: reopen and click the scrim.
+    // Round-08 N8-m4: tap-outside is deterministic when we hit the LEFT edge of the scrim,
+    // which is the uncovered strip guaranteed by the 85vw drawer cap in sidebar.css. Click
+    // at x=10 (well inside the uncovered strip) rather than the scrim's centre, which was
+    // permanently obscured by the drawer panel at previous widths.
     await page.click('#btn-open-settings');
     await page.waitForFunction(() => document.body.classList.contains('settings-open'), { timeout: 2000 });
-    await page.click('#settings-scrim');
+    await page.mouse.click(10, 400);
     await page.waitForFunction(() => !document.body.classList.contains('settings-open'), { timeout: 2000 });
   } finally { await browser.close(); }
 });

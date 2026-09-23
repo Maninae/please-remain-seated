@@ -41,7 +41,24 @@ const DEFAULT_PRESET_BY_MODE = Object.freeze({
 });
 const DEFAULT_BOARD_MATCHUP_AIRLINE = 'united';
 
+// Round-08 N8-M1: Rankings tab holds its own slice of the store so a knob change on the
+// Rankings tab never rewrites the Race tab's aircraft, mode or matchup. Every rankings
+// field is prefixed `rankings*` in state and round-trips through `r*` URL params. The Race
+// tab's params (mode, a, b, seed, preset, load, ...) stay exactly as they were.
+const RANKINGS_DEFAULTS = Object.freeze({
+  rankingsMode: 'deplane',
+  rankingsPresetId: DEFAULT_CABIN_PRESET_ID,
+  rankingsLoadFactor: 0.85,
+  rankingsCompliance: PASSENGER_DEFAULTS.compliance,
+  rankingsFamilies: PASSENGER_DEFAULTS.groupFraction,
+  rankingsBagP0: PASSENGER_DEFAULTS.bagCountProbabilities[0],
+  rankingsBagP1: PASSENGER_DEFAULTS.bagCountProbabilities[1],
+  rankingsBagP2: PASSENGER_DEFAULTS.bagCountProbabilities[2],
+  rankingsBins: 'space',
+});
+
 const DEFAULTS = Object.freeze({
+  ...RANKINGS_DEFAULTS,
   mode: 'deplane',
   strategyA: DEFAULT_DEPLANE_STRATEGY_ID,
   // Fix for NEW3-M4: the round-3 critic caught that the previous default (free-for-all vs
@@ -86,6 +103,15 @@ const URL_NUMERIC_KEYS = Object.freeze([
   ['bag2', 'bagP2', 0, 1],
 ]);
 
+// Round-08 N8-M1: `r*` URL keys round-trip the Rankings tab's own state slice. They read
+// on cold load like the Race tab's params, but rankings-tab writes never touch the
+// non-prefixed keys and race-tab writes never touch these.
+const RANKINGS_URL_NUMERIC_KEYS = Object.freeze([
+  ['rload', 'rankingsLoadFactor', 0.4, 1],
+  ['rcomply', 'rankingsCompliance', 0, 1],
+  ['rgroups', 'rankingsFamilies', 0, 0.6],
+]);
+
 function readFromUrl(defaults) {
   if (typeof window === 'undefined') return { ...defaults };
   const params = new URLSearchParams(window.location.search);
@@ -111,8 +137,47 @@ function readFromUrl(defaults) {
   }
   const speed = readNum('speed', 1, 60);
   if (speed !== null) state.speed = speed;
+
+  // Rankings-tab slice: read every `r*` key that is present so a copied Rankings URL
+  // reproduces the chart on screen. Missing keys inherit whatever the rankings defaults
+  // (or a stored value) already carry.
+  const rMode = readStr('rmode');
+  if (rMode === 'deplane' || rMode === 'board') state.rankingsMode = rMode;
+  const rPreset = readStr('rpreset');
+  if (rPreset && CABIN_PRESET_BY_ID[rPreset]) state.rankingsPresetId = rPreset;
+  // Backward compat: on cold load with `?tab=rankings` and no r-prefixed params, seed the
+  // rankings slice from the legacy `mode`/`preset` params so a link written before the
+  // slice split still opens the Rankings tab on the aircraft its author meant. Writes from
+  // this session still go to the r-prefixed keys (round-08 N8-M1 spec).
+  const currentTab = readStr('tab');
+  if (currentTab === 'rankings') {
+    if (!rMode && (modeFromUrl === 'deplane' || modeFromUrl === 'board')) state.rankingsMode = modeFromUrl;
+    if (!rPreset && preset && CABIN_PRESET_BY_ID[preset]) state.rankingsPresetId = preset;
+  }
+  const rBags = readStr('rbags');
+  if (rBags === 'default' || rBags === 'light' || rBags === 'heavy') {
+    const mix = RANKINGS_BAG_MIXES[rBags];
+    if (mix) [state.rankingsBagP0, state.rankingsBagP1, state.rankingsBagP2] = mix;
+  }
+  const rBins = readStr('rbins');
+  if (rBins === 'space' || rBins === 'roomy' || rBins === 'legacy') {
+    state.rankingsBins = rBins === 'roomy' ? 'space' : rBins;
+  }
+  for (const [param, key, min, max] of RANKINGS_URL_NUMERIC_KEYS) {
+    const value = readNum(param, min, max);
+    if (value !== null) state[key] = value;
+  }
   return state;
 }
+
+// Same three named mixes rankings-settings uses; we duplicate the values here so the URL
+// reader is standalone and does not import that module. Kept in sync by convention (any
+// change to the sidebar's mix table needs to move this one too).
+const RANKINGS_BAG_MIXES = Object.freeze({
+  default: [0.20, 0.60, 0.20],
+  light: [0.40, 0.50, 0.10],
+  heavy: [0.10, 0.50, 0.40],
+});
 
 function applyStrategy(state, laneLetter, strategyId) {
   const isDeplane = DEPLANE_STRATEGIES.some((strategy) => strategy.id === strategyId);
@@ -140,11 +205,18 @@ function readFromLocalStorage(defaults) {
  * a cold deplane visit stays on the A320.
  */
 function applyPerModeDefaults(state, hadStoredState, urlParams) {
-  if (hadStoredState) return state;
-  if (urlParams && urlParams.has('preset')) return state;
-  const perMode = DEFAULT_PRESET_BY_MODE[state.mode];
-  if (perMode && CABIN_PRESET_BY_ID[perMode]) return { ...state, presetId: perMode };
-  return state;
+  const next = { ...state };
+  if (!hadStoredState && !(urlParams && urlParams.has('preset'))) {
+    const perMode = DEFAULT_PRESET_BY_MODE[state.mode];
+    if (perMode && CABIN_PRESET_BY_ID[perMode]) next.presetId = perMode;
+  }
+  // Rankings slice: mirror the Race default, so a cold visit to Rankings in board mode
+  // lands on the same first-class two-class preset the Race tab does.
+  if (!hadStoredState && !(urlParams && urlParams.has('rpreset'))) {
+    const rPerMode = DEFAULT_PRESET_BY_MODE[state.rankingsMode];
+    if (rPerMode && CABIN_PRESET_BY_ID[rPerMode]) next.rankingsPresetId = rPerMode;
+  }
+  return next;
 }
 
 /**
@@ -229,6 +301,10 @@ function boot() {
           // to the About tab, so the About tab can print the tier state that shipped.
           seedTierSummary: computeSeedTierSummary(result.indexObject),
           preview: result.indexObject.preview,
+          // Round-08 N8-B1: hand the raw index to the listeners so the About tab can find
+          // the a320 board headline cell and compute the same back-to-front rate the
+          // caveat under the ranked chart prints.
+          indexObject: result.indexObject,
         };
         window.dispatchEvent(new CustomEvent('prs:rankings-index-loaded', { detail: generationRef.current }));
       }
@@ -326,8 +402,29 @@ function writeUrl(state) {
   params.set('bag0', formatNumericForUrl(state.bagP0));
   params.set('bag1', formatNumericForUrl(state.bagP1));
   params.set('bag2', formatNumericForUrl(state.bagP2));
+  // Round-08 N8-M1: rankings slice writes to its own `r*` keys so both tabs' states can
+  // live in the same URL without one editing the other. A round-trip on the Rankings URL
+  // reproduces the chart on screen; a round-trip on the Race URL reproduces the race.
+  params.set('rmode', state.rankingsMode);
+  params.set('rpreset', state.rankingsPresetId);
+  params.set('rload', formatNumericForUrl(state.rankingsLoadFactor));
+  params.set('rcomply', formatNumericForUrl(state.rankingsCompliance));
+  params.set('rgroups', formatNumericForUrl(state.rankingsFamilies));
+  params.set('rbags', bagsLabelForShares(state.rankingsBagP0, state.rankingsBagP1, state.rankingsBagP2));
+  params.set('rbins', state.rankingsBins === 'space' ? 'roomy' : state.rankingsBins);
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
   try { window.history.replaceState({}, '', next); } catch (error) { /* ignore */ }
+}
+
+function bagsLabelForShares(p0, p1, p2) {
+  const shares = [Number(p0) || 0, Number(p1) || 0, Number(p2) || 0];
+  let best = 'default';
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const [name, mix] of Object.entries(RANKINGS_BAG_MIXES)) {
+    const distance = Math.hypot(shares[0] - mix[0], shares[1] - mix[1], shares[2] - mix[2]);
+    if (distance < bestDistance) { best = name; bestDistance = distance; }
+  }
+  return best;
 }
 
 function formatNumericForUrl(value) {

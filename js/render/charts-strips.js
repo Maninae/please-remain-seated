@@ -16,6 +16,7 @@ import {
   SVG_NS, ensureSvg, clearElement, setAttrs, readNumericAttr,
   appendCircle, appendLine, appendRect, appendText,
 } from './charts-svg-dom.js';
+import { niceCeiling, niceMinuteStep } from './axis-scale.js';
 
 // Round-05: bumped from 130 -> 200 px so the wider airline labels ("Southwest (2026 assigned
 // seats)") fit inside the label gutter without clipping. Textbook labels are all much shorter
@@ -215,22 +216,57 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
 /**
  * Compute a shared axis (floor and cap in seconds) across an arbitrary list of strip-chart
  * series. Used by the "Run it N times" comparison so its two stacked panels (textbook and
- * airline in board mode) project the same minutes onto the same pixel scale. Fixed value
- * pairs bypass renderStrips' per-panel auto-scaling entirely.
+ * airline in board mode) project the same minutes onto the same pixel scale.
+ *
+ * Round-08 N8-M2: cap the axis around the row medians (not around the union max) so the
+ * tightest cluster is legible. Both the FLOOR and the CAP come from the medians rather than
+ * the raw seeds; the p10 raises the leading edge past the fastest textbook tail and the p85
+ * with a small margin holds most of the airline cluster comfortably. Rows past the cap or
+ * below the floor surface as broken bars through the existing offScaleCount path (which
+ * fires now that niceCeiling of the cap no longer envelops every drawn value).
  */
 export function computeSharedStripsAxis(seriesList) {
   const allValues = [];
+  const medians = [];
   if (Array.isArray(seriesList)) {
     for (const s of seriesList) {
       if (!s || !Array.isArray(s.values)) continue;
-      for (const v of s.values) if (Number.isFinite(v)) allValues.push(v);
+      const rowValues = [];
+      for (const v of s.values) {
+        if (Number.isFinite(v)) { allValues.push(v); rowValues.push(v); }
+      }
+      if (rowValues.length > 0) {
+        rowValues.sort((a, b) => a - b);
+        medians.push(rowValues[Math.floor(rowValues.length / 2)]);
+      }
     }
   }
   if (allValues.length === 0) return { axisMinSeconds: 0, axisMaxSeconds: 60 };
-  const rawMax = Math.max(...allValues);
-  const axisMaxSeconds = niceCeiling(rawMax);
-  const axisMinSeconds = computeStripsFloor(allValues, axisMaxSeconds);
+  // p85 of the medians gives a cap that just barely covers most of the airline cluster and
+  // pushes the slowest front-to-back tail off-scale (where it becomes an "N off scale"
+  // mark). If we only have a handful of series, back off to the max so a two-row compare
+  // still shows everything.
+  const rawCap = medians.length >= 6
+    ? percentile(medians, 0.85) * 1.05
+    : Math.max(...allValues);
+  const axisMaxSeconds = niceCeiling(rawCap);
+  // Floor from the medians p10 too: raise the leading edge above the fastest textbook tail
+  // so the airline cluster (which sits three or four minutes above p10) actually spans the
+  // frame instead of clumping near the right edge. Fall back to the raw-seed floor when
+  // there aren't enough medians to trust a percentile.
+  const floorSourceValues = medians.length >= 6 ? [percentile(medians, 0.1)] : allValues;
+  const axisMinSeconds = computeStripsFloor(floorSourceValues, axisMaxSeconds);
   return { axisMinSeconds, axisMaxSeconds };
+}
+
+function percentile(sortedOrUnsorted, q) {
+  if (!Array.isArray(sortedOrUnsorted) || sortedOrUnsorted.length === 0) return 0;
+  const sorted = [...sortedOrUnsorted].sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] * (1 - (pos - lo)) + sorted[hi] * (pos - lo);
 }
 
 /**
@@ -241,15 +277,15 @@ export function computeSharedStripsAxis(seriesList) {
 function computeStripsFloor(allValues, paddedMax) {
   if (!Array.isArray(allValues) || allValues.length === 0) return 0;
   const minVal = Math.min(...allValues);
-  // N7-m3: relaxed floor gates (matching rankings-chart) so the strip chart earns a floor
-  // whenever the fastest dot sits meaningfully above zero, not just when it exceeds the
-  // old 25% cap threshold.
-  if (minVal < 1.5 * 60) return 0;
-  if (minVal < paddedMax * 0.15) return 0;
-  const breather = Math.max(30, (paddedMax - minVal) * 0.05);
+  // Round-08 N8-m3: matches the ranked chart's relaxed floor policy so small-cap panels
+  // (a compare panel that tops out at 5 or 10 minutes) can still show a floor at 0.5 or 1
+  // minute rather than snapping back to 0 and wasting the leading quarter of the frame.
+  if (minVal < 30) return 0;
+  if (minVal < paddedMax * 0.10) return 0;
+  const breather = Math.max(15, (paddedMax - minVal) * 0.05);
   const raw = Math.max(0, minVal - breather);
   const minutes = raw / 60;
-  const step = minutes >= 20 ? 5 : minutes >= 10 ? 2 : 1;
+  const step = minutes >= 20 ? 5 : minutes >= 10 ? 2 : minutes >= 5 ? 1 : minutes >= 1 ? 0.5 : 0.25;
   return Math.floor(minutes / step) * step * 60;
 }
 
@@ -280,25 +316,7 @@ function hashString(s) {
   return h;
 }
 
-export function niceCeiling(seconds) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return 60;
-  const paddedSeconds = seconds * 1.02;
-  const minutes = paddedSeconds / 60;
-  const steps = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
-  for (let i = 0; i < steps.length; i += 1) {
-    if (minutes <= steps[i]) return steps[i] * 60;
-  }
-  return Math.ceil(minutes / 60) * 3600;
-}
-
-function niceMinuteStep(minuteMax, targetTicks) {
-  const raw = minuteMax / targetTicks;
-  const candidates = [0.5, 1, 2, 5, 10, 15, 20, 30];
-  for (let i = 0; i < candidates.length; i += 1) {
-    if (candidates[i] >= raw) return candidates[i];
-  }
-  return Math.ceil(raw / 30) * 30;
-}
+export { niceCeiling };
 
 function formatMinutes(m) {
   if (m === 0) return '0';

@@ -16,6 +16,25 @@
  */
 
 import { CABIN_PRESETS, CABIN_PRESET_BY_ID } from '../../engine/cabin-presets.js';
+
+// Round-08 N8-B1: shared field figure for the MythBusters back-to-front test (7 pax/min at
+// 173 seats). The caveat below and the About tab both cite this so the two tabs agree on
+// the comparison rather than each printing a different number for the same sentence.
+export const MYTHBUSTERS_BACK_TO_FRONT_RATE_PAX_PER_MIN = 7;
+
+/**
+ * Compute the back-to-front sim rate (pax/min) from a loaded cell. Used by the About tab so
+ * its assumptions bullet ("back-to-front runs about X pax/min in the sim, against Y pax/min
+ * in the MythBusters field test") is arithmetic on the same cell data the caveat quotes.
+ * Returns null when the cell is missing or has no back-to-front row.
+ */
+export function computeBackToFrontRatePaxPerMin(cellData) {
+  if (!cellData || !Array.isArray(cellData.strategies)) return null;
+  const row = cellData.strategies.find((s) => s.id === 'back-to-front');
+  const pax = Number.isFinite(cellData.passengerCount) ? cellData.passengerCount : null;
+  if (!row || !Number.isFinite(row.medianSeconds) || row.medianSeconds <= 0 || pax === null) return null;
+  return pax / (row.medianSeconds / 60);
+}
 import {
   loadRankingsIndex, snapKnobsToGrid, selectCellForRequest,
   sensitivityCellsFor, hasSensitivity, loadCellFile, loadCellWithFallback,
@@ -86,7 +105,7 @@ export function mountRankingsTab({ store }) {
     // Populate the preset select for the CURRENT mode so a mode toggle never lists a
     // preset that mode cannot answer. rerender() re-populates this whenever the mode
     // changes.
-    const initialMode = panel.dataset.rankingsMode || store.state().mode || 'deplane';
+    const initialMode = store.state().rankingsMode || 'deplane';
     populatePresetSelect(state.indexObject, initialMode);
     state.lastPopulatedMode = initialMode;
     // Announce the load so the About tab (and anyone else) picks up the generation date
@@ -98,6 +117,7 @@ export function mountRankingsTab({ store }) {
         seedTiers: result.indexObject.seedTiers,
         seedTierSummary: computeSeedTierSummary(result.indexObject),
         preview: result.indexObject.preview,
+        indexObject: result.indexObject,
       },
     }));
     rerender();
@@ -191,7 +211,7 @@ export function mountRankingsTab({ store }) {
     try {
       const sensitivityData = await loadSensitivityData(request.mode, request.preset, cellData);
       if (Object.keys(sensitivityData).length === 0) {
-        sensitivityWrap.innerHTML = '<p class="rankings-sensitivity-empty">Sensitivity cell files have not been generated yet. Run `npm run precompute` to fill them in.</p>';
+        sensitivityWrap.innerHTML = '<p class="rankings-sensitivity-empty">This cell is still being computed; showing the preview.</p>';
         return;
       }
       renderSensitivitySlopes(sensitivityWrap, {
@@ -200,7 +220,7 @@ export function mountRankingsTab({ store }) {
         defaults: state.indexObject.defaults,
       });
     } catch (error) {
-      sensitivityWrap.innerHTML = '<p class="rankings-sensitivity-empty">Sensitivity cell files are missing; run `npm run precompute` to fill them in.</p>';
+      sensitivityWrap.innerHTML = '<p class="rankings-sensitivity-empty">This cell is still being computed; showing the preview.</p>';
     }
   }
 
@@ -303,7 +323,7 @@ function renderEmptyState(panel) {
   if (stats) stats.innerHTML = '';
   const sens = panel.querySelector('[data-rankings-sensitivity]');
   if (sens) sens.innerHTML = '';
-  setStatus(panel, 'Rankings data has not been generated yet. Run `npm run precompute:preview` for a fast preview, or `npm run precompute` for the full grid.');
+  setStatus(panel, 'Rankings data is still being computed; showing the preview.');
 }
 
 function renderNoCell(panel, request) {
@@ -350,22 +370,23 @@ function wireControls(panel, store, onChange) {
         other.setAttribute('aria-checked', String(isMatch));
         other.classList.toggle('on', isMatch);
       }
-      panel.dataset.rankingsMode = value;
-      // N7-M2: push the mode into the shared store so the URL writer rewrites `?mode=`
-      // and the copied link reproduces the chart on screen. The store subscription runs
-      // rerender, so no explicit onChange() call is needed on this branch.
-      if (store.state().mode !== value) store.update({ mode: value });
+      // Round-08 N8-M1: write to the RANKINGS slice, not the shared `mode` field, so the
+      // Race tab's mode/matchup are never touched by a Rankings-tab toggle. The store
+      // subscription runs rerender, so no explicit onChange() call is needed on this
+      // branch.
+      if (store.state().rankingsMode !== value) store.update({ rankingsMode: value });
       else onChange();
     });
   }
   const presetSelect = panel.querySelector('#rankings-preset-select');
   if (presetSelect) {
     presetSelect.addEventListener('change', () => {
-      panel.dataset.rankingsPreset = presetSelect.value;
-      // N7-M2: mirror the mode toggle. `?preset=` now reflects the aircraft actually being
-      // charted, so a Boeing 777 deplaning link opens on the Boeing 777 deplaning chart.
-      if (store.state().presetId !== presetSelect.value) store.update({ presetId: presetSelect.value });
-      else onChange();
+      // Round-08 N8-M1: mirror the mode toggle. `?rpreset=` now reflects the aircraft
+      // charted, so a Boeing 777 deplaning link opens on the Boeing 777 deplaning chart
+      // while the Race tab keeps whatever preset the reader set there.
+      if (store.state().rankingsPresetId !== presetSelect.value) {
+        store.update({ rankingsPresetId: presetSelect.value });
+      } else onChange();
     });
   }
 }
@@ -418,11 +439,21 @@ function isMultiClass(preset) {
 }
 
 function buildRequestFromStore(indexObject, storeState, panel) {
-  // Read the panel's own toggles first (they override the store's mode/preset for the tab)
-  // and fall back to the store when the tab has not yet been touched.
-  const mode = panel.dataset.rankingsMode || storeState.mode || 'deplane';
-  const preset = panel.dataset.rankingsPreset || storeState.presetId || 'a320';
-  const { snapped, nearest } = snapKnobsToGrid(storeState, indexObject.grid, indexObject.defaults);
+  // Round-08 N8-M1: read from the rankings slice exclusively so the Race tab's aircraft,
+  // matchup and knobs never leak into a Rankings request.
+  const mode = storeState.rankingsMode || 'deplane';
+  const preset = storeState.rankingsPresetId || 'a320';
+  const rankingsState = {
+    loadFactor: storeState.rankingsLoadFactor,
+    compliance: storeState.rankingsCompliance,
+    families: storeState.rankingsFamilies,
+    bagP0: storeState.rankingsBagP0,
+    bagP1: storeState.rankingsBagP1,
+    bagP2: storeState.rankingsBagP2,
+    bins: storeState.rankingsBins,
+  };
+  const { snapped, nearest } = snapKnobsToGrid(rankingsState, indexObject.grid, indexObject.defaults);
+  void panel;
   return { mode, preset, knobs: snapped, nearest, exact: true };
 }
 
@@ -692,7 +723,12 @@ function composeChartCaveat(cellData, drawnAnchors = null) {
   const preset = cellData.cell?.preset || '';
   const pax = Number.isFinite(cellData.passengerCount) ? cellData.passengerCount : null;
   if (!pax) return '';
-  const b2f = cellData.strategies.find((s) => s.id === 'back-to-front');
+  // Round-08 N8-B1: MythBusters measured BACK-TO-FRONT, so the like-for-like row from the
+  // sim is `back-to-front` (labelled "Back to front, in zones" on the chart above). The
+  // caveat used to say "Front-to-back" while pulling the back-to-front row's rate, so the
+  // page contradicted itself on every preset the clause fired. Name what we quote.
+  const backToFront = cellData.strategies.find((s) => s.id === 'back-to-front');
+  const backToFrontLabel = backToFront?.label || 'Back to front, in zones';
   const parts = [];
   parts.push(`This ranking is a ${pax}-passenger cabin at these settings.`);
   // N7-M3: the caller passes in the anchors the chart actually drew (label included) so a
@@ -702,24 +738,22 @@ function composeChartCaveat(cellData, drawnAnchors = null) {
     ? drawnAnchors
     : anchorsFor({ mode: 'board', preset, passengerCount: pax });
   const mythbustersAnchor = anchorsHere.find((a) => a.id === 'mythbusters-b2f');
-  if (b2f && Number.isFinite(b2f.medianSeconds) && b2f.medianSeconds > 0) {
-    const b2fRate = pax / (b2f.medianSeconds / 60);
-    const mythbustersRate = 7;
-    // N7-M1: the verdict word is computed from the two rates instead of a literal, so the
-    // sentence stops printing "slower" beside a rate higher than the field figure it is
-    // compared against. When the two rates are within half a passenger per minute of each
-    // other, drop the clause entirely: neither "faster" nor "slower" is defensible there.
-    // N7-M3 companion: name the MythBusters tick only when it is drawn on this viewport;
-    // on phone, phrase the comparison against the field figure alone so we cite a source
-    // the reader has no way to check against a missing chart mark.
-    const rateGap = Math.abs(b2fRate - mythbustersRate);
+  // Round-08 N8-M4: the MythBusters clause only appears when the anchor is DRAWN, because
+  // the anchor gating (see rankings-anchors.js) already handles cabin-class parity. On a
+  // widebody the anchor is withheld, so the clause is withheld too. On a phone the anchor
+  // may be dropped for space; on those viewports the chart still draws the anchor as a
+  // tick (not a label), so the caveat mirrors the chart and drops the sentence rather
+  // than making a comparison the reader has no way to check.
+  if (mythbustersAnchor && backToFront && Number.isFinite(backToFront.medianSeconds) && backToFront.medianSeconds > 0) {
+    const backToFrontRate = pax / (backToFront.medianSeconds / 60);
+    const mythbustersRate = MYTHBUSTERS_BACK_TO_FRONT_RATE_PAX_PER_MIN;
+    // The verdict word is computed from the two rates so the sentence never prints a
+    // "slower" beside a higher number, or "faster" beside a lower one. When the two rates
+    // are within half a passenger per minute of each other, drop the clause entirely.
+    const rateGap = Math.abs(backToFrontRate - mythbustersRate);
     if (rateGap >= 0.5) {
-      const verdict = b2fRate > mythbustersRate ? 'faster' : 'slower';
-      if (mythbustersAnchor) {
-        parts.push(`Front-to-back runs ${verdict} here than the MythBusters back-to-front field test: about ${b2fRate.toFixed(1)} pax/min in the sim, against ~${mythbustersRate} pax/min measured on TV.`);
-      } else {
-        parts.push(`Front-to-back runs ${verdict} here than the ~${mythbustersRate} pax/min back-to-front field figure: about ${b2fRate.toFixed(1)} pax/min in the sim.`);
-      }
+      const verdict = backToFrontRate > mythbustersRate ? 'faster' : 'slower';
+      parts.push(`${backToFrontLabel} runs ${verdict} here than the MythBusters back-to-front field test: about ${backToFrontRate.toFixed(1)} pax/min in the sim, against ~${mythbustersRate} pax/min measured on TV.`);
     }
   }
   const airlineRows = cellData.strategies.filter((s) => s.family === 'airline');

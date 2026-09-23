@@ -105,12 +105,14 @@ test('rankings tab: renders chart, stat tiles, and knob notes when data is prese
     await page.evaluate(() => localStorage.clear());
     await page.goto(`${BASE_URL}/index.html?tab=rankings&seed=rank-1`, { waitUntil: 'load' });
     await page.waitForSelector('.rankings-tab');
-    // Wait for either the chart or the empty-state status text.
+    // Wait for either a FULLY-rendered chart (five or more strategy dots) or the
+    // empty-state status text. The 20s ceiling accommodates slow parallel-suite runs;
+    // waiting for one circle used to slip past a partially-drawn chart.
     await page.waitForFunction(() => {
-      const hasChart = !!document.querySelector('.rankings-chart-svg-host svg circle');
+      const circleCount = document.querySelectorAll('.rankings-chart-svg-host svg circle').length;
       const status = document.querySelector('[data-rankings-status]')?.textContent || '';
-      return hasChart || status.length > 0;
-    }, { timeout: 8000 });
+      return circleCount >= 5 || status.length > 0;
+    }, { timeout: 20000 });
 
     const state = await page.evaluate(() => ({
       hasChart: !!document.querySelector('.rankings-chart-svg-host svg'),

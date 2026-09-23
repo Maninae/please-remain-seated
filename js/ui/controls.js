@@ -45,7 +45,9 @@ export function mountControls({ store, sound, race }) {
       button.addEventListener('click', () => {
         const mode = button.dataset.mode;
         if (mode !== 'deplane' && mode !== 'board') return;
-        for (const other of buttons) other.setAttribute('aria-pressed', String(other === button));
+        // Round-08 N8-m6: masthead segmented is a radiogroup, so its buttons are radios
+        // and carry aria-checked (not aria-pressed, which role="tab" ignored).
+        for (const other of buttons) other.setAttribute('aria-checked', String(other === button));
         store.update({ mode });
       });
     }
@@ -353,9 +355,9 @@ export function mountControls({ store, sound, race }) {
     setValue('preset-select', s.presetId);
     setValue('bins-select', s.bins);
     setValue('seed-input', s.seed);
-    // Mode toggle
+    // Mode toggle: aria-checked on radios (round-08 N8-m6).
     for (const button of document.querySelectorAll('.masthead .segmented .seg[data-mode]')) {
-      button.setAttribute('aria-pressed', String(button.dataset.mode === s.mode));
+      button.setAttribute('aria-checked', String(button.dataset.mode === s.mode));
     }
   }
 

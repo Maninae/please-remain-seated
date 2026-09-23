@@ -124,6 +124,18 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Round-08 N8-m2: axis chrome, not payload. Small, soft, italic, centred so the eye reads
+ * "same scale" as caption text without competing with the panel titles or the row labels
+ * eight pixels below. Sits BETWEEN the two panels, matching what the compare code says
+ * out loud. */
+.compare-shared-scale {
+  margin: 6px 0;
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-align: center;
+  font-style: italic;
+}
+
 /* Light rule between the textbook and airline groups of strips in board mode. Same paper +
  * rule tokens as the rest of the chart chrome so the split reads as a soft group divider,
  * not a heavy section break. */

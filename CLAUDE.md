@@ -118,6 +118,10 @@ design/reviews/               critic passes, referenced by finding id
 - `design/03-engine-contract.md` is binding for the engine surface. It overrides `design/01-spec.md` where they differ (it says so explicitly, and it reflects the generalized multi-aisle cabin model that the original spec's 3-3-only geometry predates).
 - No monoliths: split any file approaching ~300 lines. One nameable responsibility per module.
 
+## Rankings data
+
+`data/rankings/` is committed output of `npm run precompute` (about 7 hours on an M4 at 8 workers, resumable, low priority; `npm run precompute:preview` gives a 200-seed set in minutes). `index.json` pins `engineVersion` to the git short sha of `js/engine/` at generation. A comment-only commit under `js/engine/` does not invalidate the data; any engine logic change does, and the tool refuses to mix versions, so rerun the plan after one. The page reads `index.json` and falls back to `index-preview.json` per cell.
+
 ## Dev loop
 
 ```sh

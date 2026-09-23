@@ -38,6 +38,7 @@ import {
   ensureSvg, clearElement, setAttrs, readNumericAttr,
   appendCircle, appendLine, appendRect, appendText,
 } from '../../render/charts-svg-dom.js';
+import { niceCeiling, niceMinuteStep } from '../../render/axis-scale.js';
 
 const PADDING_LEFT_DESKTOP = 240;
 const PADDING_LEFT_PHONE = 116;
@@ -297,19 +298,20 @@ function computeAxisFloor(rows, anchors, paddedMax) {
     return s > 0 && s < min ? s : min;
   }, Number.POSITIVE_INFINITY);
   const candidate = Math.min(minP10, Number.isFinite(anchorMin) ? anchorMin : minP10);
-  // Only apply a floor when the data really do sit far from zero. N7-m3 relaxed the second
-  // gate from 25% to 15% of the axis cap so CRJ-700, E175 and 737 MAX 8 LCC deplane earn
-  // a floor: their first dot lands 20-32% of the frame from the left, well past the "empty
-  // is worth noting" threshold. The absolute floor gate stays at 1.5 minutes: below that
-  // the axis is short enough that starting at zero costs little visual room.
-  if (candidate < 1.5 * 60) return 0;
-  if (candidate < paddedMax * 0.15) return 0;
+  // Only apply a floor when the data really do sit far from zero. Round-08 N8-m3 further
+  // relaxed the absolute gate (from 90s to 30s) and the fraction gate (from 15% to 10% of
+  // the cap) so CRJ-700 and E175 deplane, whose fastest p10 sits at 45-90 s, still earn a
+  // floor instead of wasting 25-46% of the frame on the empty side. The step ladder now
+  // supports sub-minute floors on small-cap charts (e.g. a 5m cap earns a 0.5m step).
+  if (candidate < 30) return 0;
+  if (candidate < paddedMax * 0.10) return 0;
   // Leave a small breather below the data so the leftmost dot doesn't kiss the axis label.
-  const breather = Math.max(30, (paddedMax - candidate) * 0.05);
+  const breather = Math.max(15, (paddedMax - candidate) * 0.05);
   const raw = Math.max(0, candidate - breather);
   const minutes = raw / 60;
-  // Floor to a nice minute value (multiples of 1, 2, or 5 depending on scale).
-  const step = minutes >= 20 ? 5 : minutes >= 10 ? 2 : 1;
+  // Floor to a nice minute value (larger step at higher scale, sub-minute step for tiny
+  // caps so the floor lands at a legible tick rather than snapping back to 0).
+  const step = minutes >= 20 ? 5 : minutes >= 10 ? 2 : minutes >= 5 ? 1 : minutes >= 1 ? 0.5 : 0.25;
   return Math.floor(minutes / step) * step * 60;
 }
 
@@ -527,7 +529,11 @@ function anchorRowOffsetsForWidth(width) {
 
 function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick, rowOffsets, drawnAnchors }) {
   if (!anchors || anchors.length === 0) return;
-  const LABEL_MIN_GAP = 82;
+  // Round-08 N8-M3: labels are packed into rows by MEASURED bounding boxes, not by anchor
+  // midpoint, so two labels the tick-x rule thought fit on one row (KLM 92 px + Spirit
+  // 84 px against the previous 82 px inter-tick heuristic) push into different rows
+  // instead of overlapping. LABEL_H_PAD is the intra-row separator between two labels.
+  const LABEL_H_PAD = 6;
   const ROW_OFFSETS = Array.isArray(rowOffsets) && rowOffsets.length > 0 ? rowOffsets : [22, 34, 46];
   const chartInner = chartX1 - chartX0;
   const range = Math.max(1, paddedMax - paddedMin);
@@ -543,18 +549,20 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axi
       const xStart = projectSeconds(startSec);
       const xEnd = projectSeconds(endSec);
       const xMid = (xStart + xEnd) / 2;
-      return { anchor, x: xMid, xStart, xEnd, isRange };
+      const labelWidth = measureAnchorLabelWidth(anchor.label);
+      const labelLeft = xMid - labelWidth / 2;
+      const labelRight = xMid + labelWidth / 2;
+      return { anchor, x: xMid, xStart, xEnd, isRange, labelLeft, labelRight };
     })
     .filter(Boolean)
     .sort((a, b) => a.x - b.x);
-  const lastXPerRow = ROW_OFFSETS.map(() => -Infinity);
-  // Phone widths use a single row: skip a label whose x is inside LABEL_MIN_GAP / 2 of the
-  // previous one so we do not stack two labels on top of each other. Desktop uses three
-  // rows, where the row-stacking loop below already handles collisions.
+  const lastRightPerRow = ROW_OFFSETS.map(() => -Infinity);
+  // Phone widths use a single row: skip a label whose bbox would touch the previous label
+  // so we do not stack two labels on top of each other. Desktop uses three rows, where the
+  // row-stacking loop below places overlapping labels on different rows.
   const singleRow = ROW_OFFSETS.length === 1;
-  const phoneMinGap = LABEL_MIN_GAP * 0.7;
-  for (const { anchor, x, xStart, xEnd, isRange } of anchorPoints) {
-    if (singleRow && x - lastXPerRow[0] < phoneMinGap) {
+  for (const { anchor, x, xStart, xEnd, isRange, labelLeft, labelRight } of anchorPoints) {
+    if (singleRow && labelLeft < lastRightPerRow[0] + LABEL_H_PAD) {
       // Draw the tick line so the reader still sees the anchor position, but skip the
       // label to avoid overlap. The anchor's popover row on the info panel is unaffected.
       appendLine(svg, {
@@ -601,17 +609,17 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axi
         'stroke-opacity': 0.55,
       });
     }
+    // Round-08 N8-M3: pick the first row whose latest label right edge is at least
+    // LABEL_H_PAD to the left of this label's left edge. Falling through to a row with the
+    // smallest right edge (a fallback) still avoids the pathological "everything on row 0"
+    // case that used to fuse two labels.
     let bestRow = 0;
-    let bestClearance = -Infinity;
+    let bestRight = lastRightPerRow[0];
     for (let i = 0; i < ROW_OFFSETS.length; i += 1) {
-      const clearance = x - lastXPerRow[i];
-      if (clearance > bestClearance) {
-        bestClearance = clearance;
-        bestRow = i;
-      }
-      if (clearance >= LABEL_MIN_GAP) { bestRow = i; break; }
+      if (labelLeft >= lastRightPerRow[i] + LABEL_H_PAD) { bestRow = i; bestRight = lastRightPerRow[i]; break; }
+      if (lastRightPerRow[i] < bestRight) { bestRow = i; bestRight = lastRightPerRow[i]; }
     }
-    lastXPerRow[bestRow] = x;
+    lastRightPerRow[bestRow] = labelRight;
     const y = axisY - ROW_OFFSETS[bestRow];
     // Anchor label as a plain SVG <text>. When a click handler is wired we tag it with a
     // class so the pointer cursor is set via CSS (rankings.css), keeping the inline `style`
@@ -637,6 +645,31 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axi
     // `continue` before reaching this point, so tick-only anchors do not appear here.
     if (Array.isArray(drawnAnchors)) drawnAnchors.push(anchor);
   }
+}
+
+/**
+ * Round-08 N8-M3: measure an anchor label's width in the same font the SVG will render it
+ * in. We use a shared canvas 2D context (a lightweight singleton) so the measurement is
+ * fast and does not require the SVG to be in the DOM. Falls back to a character-count
+ * heuristic in a Node environment (unit tests) that has no `document`.
+ */
+let anchorLabelCanvasContext = null;
+function measureAnchorLabelWidth(text) {
+  const label = String(text || '');
+  if (typeof document === 'undefined' || !document.createElement) {
+    // Rough fallback for headless environments: 0.55 * font-size per character.
+    return label.length * ANCHOR_LABEL_FONT_PX * 0.55;
+  }
+  if (!anchorLabelCanvasContext) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext && canvas.getContext('2d');
+    if (context) {
+      context.font = `italic ${ANCHOR_LABEL_FONT_PX}px ${THEME.fontFamily}`;
+      anchorLabelCanvasContext = context;
+    }
+  }
+  if (!anchorLabelCanvasContext) return label.length * ANCHOR_LABEL_FONT_PX * 0.55;
+  return anchorLabelCanvasContext.measureText(label).width;
 }
 
 function drawRow(svg, {
@@ -745,29 +778,6 @@ function formatMedianMinutes(seconds) {
   const minutes = Math.floor(total / 60);
   const secs = total - minutes * 60;
   return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
-}
-
-function niceCeiling(seconds) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return 60;
-  const paddedSeconds = seconds * 1.05;
-  const minutes = paddedSeconds / 60;
-  const steps = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
-  for (let i = 0; i < steps.length; i += 1) {
-    if (minutes <= steps[i]) return steps[i] * 60;
-  }
-  return Math.ceil(minutes / 60) * 3600;
-}
-
-function niceMinuteStep(minuteRange) {
-  // N7-m4: aim for ~7 ticks instead of 5, so a floored board axis (12m to 45m, range 33)
-  // draws seven `5m` ticks instead of three `10m` ticks. Fewer ticks meant a slowest row
-  // at 44 min landed 15% past the last labelled tick with no scale beside it.
-  const raw = minuteRange / 7;
-  const candidates = [0.5, 1, 2, 5, 10, 15, 20, 30];
-  for (let i = 0; i < candidates.length; i += 1) {
-    if (candidates[i] >= raw) return candidates[i];
-  }
-  return Math.ceil(raw / 30) * 30;
 }
 
 function formatMinutes(m) {

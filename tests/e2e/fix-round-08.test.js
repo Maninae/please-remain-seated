@@ -192,9 +192,10 @@ test('N5-B1: deck seed count matches loaded cell on three tiers (fixture routes)
       assert.equal(ledeNum, expectedSeeds, `expected ${expectedSeeds}, got ${ledeNum} for url ${url}\n  lede: ${readOut.lede}\n  footnote: ${readOut.footnote}`);
     }
 
-    await checkOne(`${BASE_URL}/index.html?tab=rankings&mode=board&preset=a320&seed=deck-headline`, 10000);
-    await checkOne(`${BASE_URL}/index.html?tab=rankings&mode=board&preset=b787&seed=deck-nonheadline`, 2000);
-    await checkOne(`${BASE_URL}/index.html?tab=rankings&mode=board&preset=a320&load=0.7&seed=deck-sensitivity`, 2000);
+    // Round-08 N8-M1: rankings URL keys are r-prefixed.
+    await checkOne(`${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=a320&seed=deck-headline`, 10000);
+    await checkOne(`${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=b787&seed=deck-nonheadline`, 2000);
+    await checkOne(`${BASE_URL}/index.html?tab=rankings&rmode=board&rpreset=a320&rload=0.7&seed=deck-sensitivity`, 2000);
   } finally {
     await browser.close();
   }

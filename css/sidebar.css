@@ -455,7 +455,12 @@
     top: 0;
     right: 0;
     height: 100vh;
-    width: min(360px, 92vw);
+    /* Round-08 N8-m4: cap the drawer at 85% of the viewport width (min 280 px) so a real
+     * tap-outside strip always exists at the left edge. At 400 px the drawer used to be
+     * 360 px wide; the uncovered scrim was 40 px, and a Playwright center-click at
+     * (200, 400) landed on the panel instead of the scrim. 85vw at 400 px is 340 px,
+     * leaving a 60 px strip that a thumb can find. */
+    width: clamp(280px, 85vw, 360px);
     max-height: 100vh;
     overflow-y: auto;
     border-radius: 0;

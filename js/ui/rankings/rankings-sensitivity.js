@@ -19,6 +19,7 @@
  */
 
 import { THEME } from '../../render/theme.js';
+import { niceCeiling as sharedNiceCeiling } from '../../render/axis-scale.js';
 import {
   ensureSvg, clearElement, setAttrs,
   appendCircle, appendLine, appendText,
@@ -386,18 +387,7 @@ function truncateLabel(label) {
   return label.length > 22 ? `${label.slice(0, 21)}…` : label;
 }
 
-function niceCeiling(seconds) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return 60;
-  const minutes = seconds * 1.05 / 60;
-  // N6-m9: finer ladder so a panel whose slowest line is 21 min gets a 22 min ceiling
-  // rather than snapping up to 30 min. The old [20, 30, 45, ...] jump left five panels
-  // using under half their frame.
-  const steps = [1, 2, 3, 5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30, 35, 40, 45, 50, 60, 75, 90, 120];
-  for (let i = 0; i < steps.length; i += 1) {
-    if (minutes <= steps[i]) return steps[i] * 60;
-  }
-  return Math.ceil(minutes / 60) * 3600;
-}
+const niceCeiling = sharedNiceCeiling;
 
 /**
  * Axis floor for one panel: start near the fastest data point so five near-flat lines span

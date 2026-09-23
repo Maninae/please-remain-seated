@@ -22,6 +22,11 @@ import { GLOSSARY } from './glossary.js';
 import {
   DEPLANE_CALIBRATION_GATES, formatWholeRunGateSentence, formatFirstTwoMinGateSentence,
 } from './calibration-gates.js';
+import { loadCellFile } from './rankings/rankings-data.js';
+import {
+  MYTHBUSTERS_BACK_TO_FRONT_RATE_PAX_PER_MIN,
+  computeBackToFrontRatePaxPerMin,
+} from './rankings/index.js';
 
 const AIRLINE_ORDER = Object.freeze([
   'alaska', 'american', 'delta', 'united', 'southwest', 'jetblue',
@@ -147,6 +152,10 @@ export function mountAboutTab({ getGenerationInfo }) {
   });
   window.addEventListener('prs:rankings-index-loaded', (event) => {
     refreshGenerationLine(event.detail || getGenerationInfo?.());
+    // Round-08 N8-B1: compute the About tab's back-to-front rate from the SAME source the
+    // caveat under the ranked chart quotes (the a320 board headline cell). The two tabs
+    // then agree on this sentence rather than contradicting each other on the number.
+    refreshBackToFrontBullet(event.detail?.indexObject || null);
   });
   return { rerender: () => panel.replaceChildren(buildAbout()) };
 }
@@ -213,6 +222,13 @@ function buildAssumptionsSection() {
   intro.className = 'about-inline';
   intro.textContent = 'Every tuned parameter sits in js/engine/config.js with a source comment. The three top rows are the assumptions with the largest effect on the numbers.';
   section.appendChild(intro);
+  // Round-08 N8-m7: the table styles rows five different ways (measured / derived /
+  // estimate / demonstration / assumption). The key below explains the code so a reader
+  // is not left decoding italics-vs-upright and dotted underlines on their own.
+  const key = document.createElement('p');
+  key.className = 'about-inline about-assumptions-key';
+  key.innerHTML = 'Key: <span class="key-swatch" data-kind="measured">measured</span> is a peer-reviewed field figure, <span class="key-swatch" data-kind="derived">derived</span> is arithmetic on measured inputs, <span class="key-swatch" data-kind="estimate">estimate</span> is a range from trade press or practice, <span class="key-swatch" data-kind="demonstration">demonstration</span> is a controlled but non-peer-reviewed trial (n=1 TV), and <span class="key-swatch" data-kind="assumption">assumption</span> is a modelling choice.';
+  section.appendChild(key);
   const table = document.createElement('table');
   table.className = 'about-table about-assumptions-table';
   table.dataset.aboutAssumptions = '';
@@ -289,10 +305,32 @@ function buildLimitsSection() {
       <li>Cabin crew directing traffic or clearing the aisle mid-boarding.</li>
       <li>The jet-bridge queue past a fixed service time per passenger.</li>
       <li>Airline announcements' effect on compliance (that is baked into the "Follow the rules" slider).</li>
-      <li>Front-to-back boarding runs slow at the tail (about 3.8 pax/min in the sim, against 7 pax/min in the MythBusters back-to-front test). Treat the extremes of the ranking as extrapolation rather than result.</li>
+      <li data-about-back-to-front>Back to front, in zones, boards slower on the sim than the MythBusters back-to-front field test. Treat the extremes of the ranking as extrapolation rather than result.</li>
     </ul>
   `;
   return section;
+}
+
+/**
+ * Patch the Limits bullet with the same back-to-front rate the caveat under the ranked chart
+ * prints. We load the a320 headline board cell (the chart's default preset) and read its
+ * back-to-front row's median seconds; the two tabs then quote arithmetic on the same cell.
+ * Round-08 N8-B1: the two tabs used to disagree by a factor of 1.5 on this sentence.
+ */
+async function refreshBackToFrontBullet(indexObject) {
+  if (!indexObject || !Array.isArray(indexObject.cells)) return;
+  const target = indexObject.cells.find((cell) => (
+    cell.mode === 'board' && cell.preset === 'a320' && (cell.kind || 'headline') === 'headline'
+  ));
+  if (!target || !target.file) return;
+  let cellData = null;
+  try { cellData = await loadCellFile(target.file); } catch (error) { return; }
+  const rate = computeBackToFrontRatePaxPerMin(cellData);
+  if (!Number.isFinite(rate)) return;
+  const bullet = document.querySelector('[data-about-back-to-front]');
+  if (!bullet) return;
+  const mytRate = MYTHBUSTERS_BACK_TO_FRONT_RATE_PAX_PER_MIN;
+  bullet.textContent = `Back to front, in zones, runs about ${rate.toFixed(1)} pax/min in the sim on the A320 board default, against ~${mytRate} pax/min in the MythBusters back-to-front field test. Treat the extremes of the ranking as extrapolation rather than result.`;
 }
 
 function buildParagraphSection() {
