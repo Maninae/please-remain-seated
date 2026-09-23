@@ -1,0 +1,344 @@
+/*
+ * Rankings tab layout: header, mode toggle + preset select, knob notes, stat tiles, ranked
+ * chart, sensitivity slope grid, footnote. Every chart is code-drawn SVG (inline elements
+ * created by rankings-chart.js and rankings-sensitivity.js), so this file only handles the
+ * enclosing chrome and the responsive stack.
+ */
+
+.rankings-tab {
+  margin-top: var(--gap-l);
+  padding: 0 var(--page-side);
+  max-width: var(--page-max);
+  margin-left: auto;
+  margin-right: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+  padding-bottom: 60px;
+}
+
+.rankings-header {
+  display: flex;
+  gap: var(--gap-l);
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.rankings-header-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.rankings-title {
+  font-size: clamp(20px, 2.6vw, 26px);
+  margin: 0 0 6px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.rankings-lede {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  max-width: 62ch;
+}
+
+.rankings-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.rankings-toggle {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  padding: 3px;
+  gap: 2px;
+}
+
+.rankings-toggle .seg {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  min-height: var(--tap);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.rankings-toggle .seg.on,
+.rankings-toggle .seg[aria-checked="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.rankings-preset-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.rankings-preset-row select {
+  min-height: var(--tap);
+  padding: 8px 30px 8px 12px;
+  min-width: 220px;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-weight: 500;
+}
+
+.rankings-status {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  border-left: 3px solid var(--rule);
+  background: var(--paper-2);
+  border-radius: var(--radius-s);
+}
+.rankings-status:empty { display: none; }
+
+.rankings-knob-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.rankings-knob-note {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.rankings-knob-note-label {
+  color: var(--ink-muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.rankings-knob-note-value {
+  color: var(--ink);
+}
+.rankings-knob-note-warn {
+  color: var(--ink);
+  background: var(--paper-2);
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  border: 1px dashed var(--rule);
+}
+
+/* ----- Stat tiles ----- */
+
+.rankings-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rankings-stat-tile {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.rankings-stat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.rankings-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.rankings-stat-number {
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.05;
+  margin-top: 4px;
+}
+.rankings-stat-unit {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.rankings-stat-sublabel {
+  font-size: 11px;
+  color: var(--ink-muted);
+  border-top: 1px dashed var(--rule);
+  padding-top: 4px;
+  margin-top: 6px;
+}
+.rankings-stats-sub {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.rankings-stats-empty {
+  margin: 0;
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+/* Phone: stack tiles two-across, then one-across if the screen is very narrow. */
+@media (max-width: 899px) {
+  .rankings-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .rankings-stats-grid { grid-template-columns: 1fr; }
+}
+
+/* ----- Ranked chart ----- */
+
+.rankings-chart-wrap {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.rankings-chart-svg-host {
+  min-width: 0;
+  width: 100%;
+}
+.rankings-chart-svg-host svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.rankings-hover-detail {
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius-m);
+  color: var(--ink-soft);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 66px;
+}
+
+.rankings-hover-hint {
+  margin: 0;
+  color: var(--ink-muted);
+  font-style: italic;
+}
+.rankings-hover-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+}
+.rankings-hover-label {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+.rankings-hover-stats {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+/* ----- Sensitivity ----- */
+
+.rankings-sensitivity-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rankings-sensitivity-heading {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rankings-sensitivity {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 14px;
+}
+
+.rankings-slope-chart {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
+  padding: 12px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rankings-slope-heading {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
+}
+
+.rankings-slope-title {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.rankings-slope-svg-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.rankings-slope-svg-wrap svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.rankings-sensitivity-empty {
+  margin: 0;
+  color: var(--ink-muted);
+  font-style: italic;
+  padding: 8px 12px;
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius-m);
+}
+
+/* ----- Footnote ----- */
+
+.rankings-footnote {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-family: var(--font-body);
+  word-break: break-all;
+}

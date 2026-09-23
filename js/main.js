@@ -16,11 +16,14 @@ import { createStore } from './ui/store.js';
 import { mountRace } from './ui/race.js';
 import { mountControls } from './ui/controls.js';
 import { mountCompare } from './ui/compare.js';
-import { mountExplainer } from './ui/explainer.js';
 import { mountFinishCard } from './ui/finish-card.js';
 import { createSound } from './ui/sound.js';
 import { mountInfoButtons, createInfoButton } from './ui/info-popover.js';
 import { mountSettingsDrawer } from './ui/settings-drawer.js';
+import { mountTabs } from './ui/tabs.js';
+import { mountRankingsTab } from './ui/rankings/index.js';
+import { mountAboutTab } from './ui/about.js';
+import { loadRankingsIndex } from './ui/rankings/rankings-data.js';
 import {
   DEPLANE_STRATEGIES, BOARD_STRATEGIES, BOARD_STRATEGY_BY_ID,
   DEFAULT_DEPLANE_STRATEGY_ID, DEFAULT_BOARD_STRATEGY_ID,
@@ -197,14 +200,63 @@ function boot() {
 
   mountControls({ store, sound, race });
   mountCompare({ store, race });
-  mountExplainer({ store });
   mountFinishCard({ store });
+
+  // Mount the tab panels BEFORE the tab rail. mountTabs fires the initial `prs:tab-changed`
+  // synchronously, so the two secondary panels must have their listeners in place first if
+  // the initial tab is one of theirs (`?tab=rankings`, say).
+  mountRankingsTab({ store });
+  const generationRef = { current: null };
+  mountAboutTab({ getGenerationInfo: () => generationRef.current });
+
+  // Deferred: only load the rankings index once the reader visits a tab that needs it
+  // (Rankings or About). A cold visit to the Race tab must NOT hit data/rankings/ at all,
+  // so a stock Race-only test does not accumulate a 404 in its console log. Register the
+  // listener BEFORE mountTabs so the initial `prs:tab-changed` fire (synchronous, on
+  // ?tab=rankings or ?tab=about) still triggers the load.
+  let indexLoadStarted = false;
+  const kickIndexLoad = () => {
+    if (indexLoadStarted) return;
+    indexLoadStarted = true;
+    loadRankingsIndex().then((result) => {
+      if (result && result.indexObject) {
+        generationRef.current = {
+          generatedAt: result.indexObject.generatedAt,
+          engineVersion: result.indexObject.engineVersion,
+        };
+        window.dispatchEvent(new CustomEvent('prs:rankings-index-loaded', { detail: generationRef.current }));
+      }
+    }).catch(() => { /* no index yet is fine */ });
+  };
+  window.addEventListener('prs:tab-changed', (event) => {
+    const { tab } = event.detail || {};
+    if (tab === 'rankings' || tab === 'about') kickIndexLoad();
+  });
+
+  const tabs = mountTabs();
+
   mountInfoButtons(document);
   mountStrategyInfoButtons(store);
   wirePresetInfoAnchor(store);
   mountSettingsDrawer();
 
+  // The race loop stops when the reader leaves the Race tab and resumes when they return.
+  // A paused race does not draw or consume CPU on other tabs; a fresh mount always starts
+  // the race, so the initial `race.start()` below still fires.
+  window.addEventListener('prs:tab-changed', (event) => {
+    const { tab } = event.detail || {};
+    if (tab === 'race') race.start();
+    else race.pause();
+    // Re-mount info buttons inside a lazily populated panel (rankings tab controls, about
+    // tab links) once its scaffold is present.
+    if (tab === 'rankings') {
+      const panel = document.getElementById('tab-panel-rankings');
+      if (panel) mountInfoButtons(panel);
+    }
+  });
+
   race.start();
+  void tabs;
 }
 
 function mountStrategyInfoButtons(store) {
@@ -250,6 +302,9 @@ function wirePresetInfoAnchor(store) {
 function writeUrl(state) {
   if (typeof window === 'undefined' || !window.history || !window.history.replaceState) return;
   const params = new URLSearchParams();
+  // Preserve the current tab param so a store write does not wipe the tabs URL round-trip.
+  const currentTab = new URLSearchParams(window.location.search).get('tab');
+  if (currentTab) params.set('tab', currentTab);
   params.set('mode', state.mode);
   params.set('a', state.mode === 'deplane' ? state.strategyA : state.boardStrategyA);
   params.set('b', state.mode === 'deplane' ? state.strategyB : state.boardStrategyB);

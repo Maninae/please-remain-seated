@@ -27,8 +27,13 @@
   <link rel="stylesheet" href="css/race.css" />
   <link rel="stylesheet" href="css/charts.css" />
   <link rel="stylesheet" href="css/sidebar.css" />
+  <link rel="stylesheet" href="css/tabs.css" />
+  <link rel="stylesheet" href="css/rankings.css" />
+  <link rel="stylesheet" href="css/about.css" />
 </head>
-<body>
+<body data-tab="race">
+  <nav id="tab-rail" class="tab-rail" aria-label="Sections"></nav>
+
   <div class="phone-topbar" id="phone-topbar" aria-hidden="false">
     <span class="phone-topbar-title">Please Remain Seated</span>
     <button type="button" id="btn-open-settings" class="phone-topbar-btn" aria-expanded="false" aria-controls="settings-panel">
@@ -39,6 +44,7 @@
     </button>
   </div>
 
+  <div id="tab-panel-race" class="tab-panel" role="tabpanel" aria-labelledby="tab-race">
   <main class="page" id="page">
 
     <header class="masthead">
@@ -191,11 +197,6 @@
           </div>
         </section>
 
-        <details class="explainer" id="explainer">
-          <summary>How this works</summary>
-          <div class="body" id="explainer-body"></div>
-        </details>
-
         <footer class="footer">
           <span>Owen Wang</span>
           <a href="https://github.com/Maninae/please-remain-seated" target="_blank" rel="noopener">github.com/Maninae/please-remain-seated</a>
@@ -306,6 +307,13 @@
       <div class="settings-scrim" id="settings-scrim" hidden></div>
     </div>
   </main>
+  </div>
+
+  <div id="tab-panel-rankings" class="tab-panel" role="tabpanel" aria-labelledby="tab-rankings" hidden></div>
+
+  <div id="tab-panel-about" class="tab-panel" role="tabpanel" aria-labelledby="tab-about" hidden></div>
+
+  <nav id="tab-bar-phone" class="tab-bar-phone" aria-label="Sections"></nav>
 
   <script type="module" src="js/main.js"></script>
 </body>

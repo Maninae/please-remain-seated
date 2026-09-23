@@ -12,6 +12,9 @@ css/base.css                  design tokens (mirrors js/render/theme.js), type s
 css/race.css                  cabin cards, clocks, race controls (Restart, speed, worst-seats toggle)
 css/charts.css                strip chart + time-split bar styles
 css/sidebar.css               two-column grid, sticky sidebar, phone drawer, info popover styling
+css/tabs.css                  left tab rail (desktop), bottom tab bar (phone), tab panel toggling
+css/rankings.css              rankings tab layout, stat tiles, chart chrome, sensitivity grid
+css/about.css                 about tab article layout, airline sources, docs list
 
 js/main.js                    bootstrap only: reads the URL, mounts race/controls/compare/explainer/sound/finish-card, wires the store
 js/batch.js                   headless Monte Carlo: run a sim to completion across many seeds, report median/p10/p90
@@ -79,6 +82,16 @@ js/ui/                        DOM, driven by the store.
   glossary.js                    plain-language popover content, keyed by id (strategy id, preset id, or setting slug like "how-full")
   info-popover.js                round "i" button + anchored popover, keyboard-driven, one open at a time
   settings-drawer.js             phone-only settings drawer: open/close, focus trap, Escape and tap-outside close, body scroll lock
+  tabs.js                        Race / Rankings / About tab rail; keyboard nav, ?tab= round-trip, fires prs:tab-changed
+  about.js                       About tab content: thesis, model bullets, calibration, airlines, docs, generation date
+
+js/ui/rankings/               Rankings tab (data viz core).
+  index.js                       orchestrator: mounts scaffold, loads index lazily on tab activation, wires mode/preset/knob-snap re-render
+  rankings-data.js               loads data/rankings/{index,index-preview}.json, snaps knobs to grid, selects cells
+  rankings-stats.js              stat tiles: person-minutes best/worst/diff/scaled and average-idle sub-line
+  rankings-chart.js              ranked dot-and-band SVG chart, textbook/airline groups, measured-anchor overlay, sparkline
+  rankings-sensitivity.js        slope charts: one per knob, top 5 strategies as lines low/default/high, computed title
+  rankings-anchors.js            measured airline / study anchors (KLM 17-22, Spirit 20, MythBusters 24:29, Schultz field median)
 
 tools/simulate.mjs            CLI: headless Monte Carlo table (median / p10 / p90 / throughput per strategy)
 tools/og-image.mjs            Playwright screenshotter: writes media/og.png from a finished race (npm run og)

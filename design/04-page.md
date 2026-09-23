@@ -1,6 +1,13 @@
 # Page design (binding for the integration builder)
 
-One page, index.html. The hero is a race: two cabins, the same passengers and seed, two strategies. Everything else supports that.
+One page, index.html. Three tabs: Race, Rankings, About. The hero of the Race tab is two cabins racing the same passengers and seed on different strategies; the Rankings tab is the analytical core (see design/07-rankings.md); the About tab holds the thesis, the model, and the sources.
+
+## Navigation (Race, Rankings, About)
+
+- Desktop (>= 900 px): a narrow vertical tab rail is fixed on the left edge of the viewport. Each tab is a real `<button role="tab">` with a code-drawn inline SVG icon and a short label. The active tab is ink-on-paper; the rest are soft gray. Keyboard: arrow keys move focus and activate, Home / End jump to the ends.
+- Phone (< 900 px): the desktop rail hides and a bottom tab bar (fixed to viewport bottom) carries the same three tabs.
+- URL round-trip: `?tab=<race|rankings|about>` reflects the active tab and restores on reload. The tab param sits alongside every other URL param the store writes.
+- Race pauses when the reader leaves the Race tab and resumes on return. Every tab activation dispatches a `prs:tab-changed` event (detail: `{ tab }`); the race module and the rankings tab both listen.
 
 ## Hierarchy (what the eye hits, in order)
 
@@ -21,7 +28,7 @@ Two-column grid on desktop, single column on phone via a slide-in drawer. The ma
 - Where the time goes: two stacked bars (one per cabin) for the last passenger off, labelled inline; a toggle switches to the average passenger. Updates live during the race.
 - Run it 100 times: a button that runs every strategy for the current settings in a module Web Worker with a progress bar, then draws the strips sorted by median. The strip title states the finding in words. Runs count selectable: 100 (default), 200, 500.
 - Deplane this plane: in Board mode, after a race finishes, a button carries that cabin's bin layout and population into a Deplane race.
-- Explainer (collapsed by default, "How this works"): six bullets on the model with the measured sources.
+- "How this works" (moved to the About tab in round 06): the six-bullet explanation of the model lives under the About tab's "How the model works" section. The Race tab no longer carries a collapsed disclosure.
 - Footer: "Owen Wang" and the GitHub link, small.
 
 ### Breakpoints

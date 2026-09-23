@@ -409,4 +409,35 @@ export const GLOSSARY = Object.freeze({
     title: 'Door countdown',
     body: 'The clock ticks up from the seatbelt sign turning off. There is a short staging window (about 45 seconds) before the door opens, so people can prep, stand, and pull bags. That is why the timer might read a negative number before the door opens.',
   },
+
+  // -------------------- rankings tab concepts --------------------
+
+  rankings: {
+    title: 'Rankings',
+    body: 'Every strategy on the current preset, sorted by median minutes across thousands of pre-run planes. A dot is the median; the band spans the 10th to the 90th percentile. Hover a row for its histogram and n. Ticks along the top mark real airline or study times for the same aircraft class.',
+    learnMore: {
+      label: 'Rankings design doc',
+      href: 'https://github.com/Maninae/please-remain-seated/blob/main/design/07-rankings.md',
+    },
+  },
+  'person-minutes': {
+    title: 'Person-minutes going nowhere',
+    body: 'The sum, across every passenger on a flight, of the minutes they spent seated waiting or blocked in the aisle. It measures human time the airline is spending, not just clock time from door open to door close. A ten-minute delay for one person and a one-minute delay for ten people are both ten person-minutes.',
+  },
+  'measured-anchors': {
+    title: 'Measured anchors',
+    body: 'The dashed ticks along the top axis are real airline or study times, not simulator output. Sources: KLM 17 to 22 minutes on a 737-800 (Forbes 2013), Spirit about 20 minutes on an A320 (Forbes 2013), MythBusters back-to-front 24:29 on 173 seats (2014), Schultz field median 23 pax per minute out the door (Aerospace 2018). They only appear on narrowbody presets, where the comparison is fair.',
+    learnMore: {
+      label: 'Research doc',
+      href: 'https://github.com/Maninae/please-remain-seated/blob/main/design/02-research.md',
+    },
+  },
+  sensitivity: {
+    title: 'Sensitivity',
+    body: 'Each small chart shows the top five strategies as one knob moves from low to default to high. A line that stays flat means the ranking is robust; a line that swings hard means that knob makes or breaks the strategy. Only the A320 and the 737-800 (first + economy) have sensitivity runs today; the other presets show one cell each.',
+  },
+  'nearest-run': {
+    title: 'Nearest run',
+    body: 'The rankings come from a fixed grid of precomputed runs, so each knob snaps to the closest value that was actually simulated. A slider at 82 percent snaps to the 85 percent run, and the tab labels it so the reader can see the rounding.',
+  },
 });

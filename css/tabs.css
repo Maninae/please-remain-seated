@@ -1,0 +1,136 @@
+/*
+ * Tab rail + tab panels.
+ *
+ * Desktop (>= 900 px): a narrow left rail sitting outside the .page container in the flow.
+ * Rail hosts three real `<button role="tab">` nodes: Race, Rankings, About. Icon + short
+ * label; active state is ink-on-paper; the rest is soft gray. No color.
+ *
+ * Phone (< 900 px): the desktop rail hides. A bottom bar carries the same three tabs,
+ * sticky to the viewport bottom, above the phone drawer scrim and every other overlay.
+ * The bar carries the icon on top and the label beneath so a 44 px tap target still fits
+ * a legible label.
+ *
+ * Tab panels themselves are just three siblings of the page shell. Toggling `hidden` on a
+ * panel drops it out of the DOM flow so no invisible sibling steals the scroll or layout.
+ */
+
+/* ----- Tab rail (desktop) ----- */
+
+.tab-rail {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 92px;
+  padding: 24px 6px;
+  border-right: 1px solid var(--rule);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  z-index: 700;
+}
+
+.tab-rail .tab-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 4px;
+  min-height: 68px;
+  border-radius: var(--radius-m);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.tab-rail .tab-btn:hover { color: var(--ink); background: var(--paper-2); }
+.tab-rail .tab-btn:focus-visible { outline: 2px solid var(--moving); outline-offset: -2px; }
+.tab-rail .tab-btn.on {
+  color: var(--paper);
+  background: var(--ink);
+}
+.tab-rail .tab-btn .tab-icon { display: inline-flex; }
+.tab-rail .tab-btn .tab-label { display: inline; }
+
+/* Page shell shifts right on desktop so the rail does not cover the content. */
+@media (min-width: 900px) {
+  body { padding-left: 92px; }
+}
+
+@media (max-width: 899px) {
+  .tab-rail { display: none; }
+}
+
+/* ----- Tab bar (phone) ----- */
+
+.tab-bar-phone {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 66px;
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--rule);
+  background: var(--paper);
+  z-index: 1100;   /* above the phone top-bar (z 800), below the scrim (z 900)? */
+  justify-content: space-around;
+  align-items: stretch;
+  gap: 4px;
+}
+
+@media (max-width: 899px) {
+  .tab-bar-phone { display: flex; }
+  /* Make room for the bottom bar so the footer/finish-card do not sit behind it. */
+  body { padding-bottom: 66px; }
+}
+
+.tab-bar-phone .tab-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 8px;
+  min-width: 64px;
+  min-height: 54px;
+  border-radius: var(--radius-m);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  flex: 1 1 auto;
+}
+.tab-bar-phone .tab-btn.on { color: var(--paper); background: var(--ink); }
+.tab-bar-phone .tab-btn:focus-visible { outline: 2px solid var(--moving); outline-offset: -2px; }
+
+/* ----- Tab panels ----- */
+
+.tab-panel { display: block; }
+
+/* When the Rankings or About panel is active, the sidebar is not needed on the page. */
+body[data-tab="rankings"] .page-side,
+body[data-tab="about"] .page-side {
+  display: none;
+}
+body[data-tab="rankings"] .page-grid,
+body[data-tab="about"] .page-grid {
+  display: block;
+}
+body[data-tab="rankings"] .phone-topbar,
+body[data-tab="about"] .phone-topbar {
+  display: none;
+}
