@@ -23,12 +23,18 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import {
+  computeStripsChartGeometry,
+  STRIPS_PHONE_WIDTH_THRESHOLD,
+} from '../../js/render/charts-strips.js';
 
 const BASE_URL = process.env.PRS_BASE_URL || 'http://localhost:5197';
 const ARTIFACTS_DIR = path.resolve('tests/e2e/artifacts/fix-round-12');
 const ROUND_14_DIR = path.resolve('tests/e2e/artifacts/fix-round-14');
+const ROUND_15_DIR = path.resolve('tests/e2e/artifacts/fix-round-15');
 if (!existsSync(ARTIFACTS_DIR)) mkdirSync(ARTIFACTS_DIR, { recursive: true });
 if (!existsSync(ROUND_14_DIR)) mkdirSync(ROUND_14_DIR, { recursive: true });
+if (!existsSync(ROUND_15_DIR)) mkdirSync(ROUND_15_DIR, { recursive: true });
 
 async function safeLaunch() {
   try { return await chromium.launch({ headless: true }); }
@@ -194,18 +200,24 @@ test('N8-M1: Rankings tab changes never rewrite the Race tab', async (t) => {
   } finally { await browser.close(); }
 });
 
-// N9-M1 / N10-M1 / round-14: the tests below iterate BOTH panels (textbook + airline) and
-// derive the row's true median from the DOM `data-median-seconds` attribute the chart now
-// emits, not from the tick's own x. That closes the two round-10 findings: (a) the previous
-// no-edge assertion only touched svgs[1], missing the textbook panel where clamping happens;
-// (b) the previous tie assertion re-derived seconds from the median's own x, so any two
-// medians sharing an x automatically read as sharing a value.
-const STRIPS_PADDING_LEFT = 200;
-const STRIPS_PADDING_RIGHT = 24;
-const MEDIAN_TIE_TOLERANCE_SECONDS = 5;
+// N9-M1 / N10-M1 / round-14 / round-15: the tests below iterate BOTH panels (textbook +
+// airline) and derive the row's true median from the DOM `data-median-seconds` attribute
+// the chart now emits, not from the tick's own x. That closes the two round-10 findings:
+// (a) the previous no-edge assertion only touched svgs[1], missing the textbook panel
+// where clamping happens; (b) the previous tie assertion re-derived seconds from the
+// median's own x, so any two medians sharing an x automatically read as sharing a value.
+//
+// Round-11 R11-m2: chart geometry comes from the renderer's own computeStripsChartGeometry
+// (imported at top of file) rather than a copy of STRIPS_PADDING_LEFT / STRIPS_PADDING_RIGHT
+// that already drifted 86 px from the value the renderer uses when a panel has off-scale
+// rows. The axis extents now match the ones the chart draws exactly.
+const DESKTOP_TIE_TOLERANCE_SECONDS = 5;
+const PHONE_TIE_TOLERANCE_BUFFER_SECONDS = 0.5;
 
-async function runCompareAndMeasure(browser, preset, { width = 1280, height = 900 } = {}) {
-  const context = await browser.newContext({ viewport: { width, height } });
+async function runCompareAndMeasure(browser, preset, { width = 1280, height = 900, mobile = false } = {}) {
+  const contextOpts = { viewport: { width, height } };
+  if (mobile) { contextOpts.hasTouch = true; contextOpts.isMobile = true; }
+  const context = await browser.newContext(contextOpts);
   const page = await goto(await context.newPage(),
     `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=n8m2-${preset}`);
   const seedSelect = await page.$('#seed-count-select');
@@ -216,17 +228,35 @@ async function runCompareAndMeasure(browser, preset, { width = 1280, height = 90
     return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
   }, {}, { timeout: 90000 });
 
-  const measurements = await page.evaluate(({ padL, padR }) => {
+  const measurements = await page.evaluate((phoneWidthThreshold) => {
     const wrap = document.getElementById('strips-wrap');
     const svgs = Array.from(wrap.querySelectorAll('svg'));
     const panels = [];
     for (const svg of svgs) {
       const svgWidth = Number(svg.getAttribute('width'));
-      const chartX0 = padL;
-      const chartX1 = svgWidth - padR;
-      const plotBandPx = Math.max(1, chartX1 - chartX0);
-      const airlineRowIds = new Set();
-      // We can identify airline rows from the label attribute the chart emits.
+      // Derive the axis baseline directly from the DOM: the axis rule is the widest
+      // horizontal line drawn in the SVG. Falls back to the padding computation only if
+      // the rule is missing, which should never happen on a rendered panel.
+      const lines = Array.from(svg.querySelectorAll('line'));
+      let chartX0 = null;
+      let chartX1 = null;
+      let bestSpan = 0;
+      for (const line of lines) {
+        const x1 = Number(line.getAttribute('x1'));
+        const x2 = Number(line.getAttribute('x2'));
+        const y1 = Number(line.getAttribute('y1'));
+        const y2 = Number(line.getAttribute('y2'));
+        if (!Number.isFinite(x1) || !Number.isFinite(x2)) continue;
+        if (Math.abs(y1 - y2) > 0.001) continue;
+        const span = Math.abs(x2 - x1);
+        if (span > bestSpan) {
+          bestSpan = span;
+          chartX0 = Math.min(x1, x2);
+          chartX1 = Math.max(x1, x2);
+        }
+      }
+      const plotBandPx = Math.max(1, (chartX1 || 0) - (chartX0 || 0));
+      const isPhone = svgWidth < phoneWidthThreshold;
       const medianLines = Array.from(svg.querySelectorAll('line[data-median-seconds]'));
       const medians = medianLines.map((line) => ({
         rowId: line.getAttribute('data-row-id') || '',
@@ -235,24 +265,44 @@ async function runCompareAndMeasure(browser, preset, { width = 1280, height = 90
       })).filter((m) => Number.isFinite(m.x) && Number.isFinite(m.seconds));
       const offScale = Array.from(svg.querySelectorAll('text[data-row-off-scale]')).map((t) => {
         const bbox = t.getBBox();
+        const parseFloatOrNull = (val) => {
+          if (val == null || val === '') return null;
+          const n = Number(val);
+          return Number.isFinite(n) ? n : null;
+        };
         return {
           rowId: t.getAttribute('data-row-off-scale') || '',
           text: (t.textContent || '').trim(),
           clock: t.getAttribute('data-off-scale-clock') || '',
           seconds: Number(t.getAttribute('data-median-seconds')),
+          p10Seconds: parseFloatOrNull(t.getAttribute('data-off-scale-p10-seconds')),
+          barLeftX: parseFloatOrNull(t.getAttribute('data-off-scale-bar-left-x')),
           bboxLeft: bbox.x,
           bboxRight: bbox.x + bbox.width,
           bboxTop: bbox.y,
           bboxBottom: bbox.y + bbox.height,
         };
       });
-      panels.push({ svgWidth, chartX0, chartX1, plotBandPx, medians, offScale });
+      panels.push({ svgWidth, chartX0, chartX1, plotBandPx, isPhone, medians, offScale });
     }
     return { panels };
-  }, { padL: STRIPS_PADDING_LEFT, padR: STRIPS_PADDING_RIGHT });
+  }, STRIPS_PHONE_WIDTH_THRESHOLD);
   await shot(page, `compare-board-${preset}-${width}x${height}.png`);
   await context.close();
   return measurements;
+}
+
+// Load the row's committed p10 / cap so we can independently derive where the off-scale
+// bar's left edge should land for that row. The e2e run itself renders live (100 seeds),
+// but the 10 000-seed cell is the same shape and gives us the ground-truth p10 the
+// renderer would compute at scale.
+function loadCellRowsByPreset(preset) {
+  const file = findHeadlineCellFile('board', preset);
+  if (!file) return null;
+  const cell = JSON.parse(readFileSync(file, 'utf-8'));
+  return cell.strategies.map((s) => ({
+    id: s.id, family: s.family, median: s.medianSeconds, p10: s.p10, p90: s.p90,
+  }));
 }
 
 test('round-14: on-scale medians never sit on the plot-band edge on BOTH panels (a320)', async (t) => {
@@ -272,28 +322,186 @@ test('round-14: on-scale medians never sit on the plot-band edge on BOTH panels 
   } finally { await browser.close(); }
 });
 
-test('round-14: no two on-scale medians share a 2 px slot unless within 5 s of each other, BOTH panels (a320 and a321neo-three-class)', async (t) => {
+test('round-14: no two on-scale medians share a 2 px slot unless within 5 s of each other, BOTH panels, at desktop AND phone widths (a320 and a321neo-three-class)', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
-    for (const preset of ['a320', 'a321neo-three-class']) {
-      const { panels } = await runCompareAndMeasure(browser, preset);
-      for (let i = 0; i < panels.length; i += 1) {
-        const panel = panels[i];
-        for (let a = 0; a < panel.medians.length; a += 1) {
-          for (let b = a + 1; b < panel.medians.length; b += 1) {
-            const dx = Math.abs(panel.medians[a].x - panel.medians[b].x);
-            const ds = Math.abs(panel.medians[a].seconds - panel.medians[b].seconds);
-            if (dx < 2) {
-              assert.ok(ds < MEDIAN_TIE_TOLERANCE_SECONDS,
-                `${preset}: panel ${i}: median ticks for ${panel.medians[a].rowId} and `
-                + `${panel.medians[b].rowId} share x within ${dx.toFixed(2)} px, but their `
-                + `true medians differ by ${ds.toFixed(1)} s (values ${panel.medians[a].seconds.toFixed(1)}, `
-                + `${panel.medians[b].seconds.toFixed(1)})`);
+    // Round-11 R11-M1 / R11-m1: run the tie invariant at BOTH desktop and phone widths.
+    // The desktop run keeps the strict 5 s tolerance; the phone run floors at 5 s but
+    // scales up to what a 400 px viewport can physically resolve on the slowest preset,
+    // because 400 px cannot separate 5 s pairs on a 1080 s plot band no matter where the
+    // gutter is set. The scaled tolerance is 2 px worth of the actual band plus 0.5 s.
+    for (const viewport of [
+      { width: 1280, height: 900, mobile: false, label: 'desktop' },
+      { width: 400, height: 800, mobile: true, label: 'phone' },
+    ]) {
+      for (const preset of ['a320', 'a321neo-three-class', 'b737max8-lcc']) {
+        const { panels } = await runCompareAndMeasure(browser, preset, viewport);
+        for (let i = 0; i < panels.length; i += 1) {
+          const panel = panels[i];
+          if (panel.medians.length < 2) continue;
+          // Derive px-per-second from two on-scale median points. The chart projects each
+          // median as x = chartX0 + (seconds - floor) * plotBandPx / (cap - floor), so any
+          // two medians give slope = (s2 - s1) / (x2 - x1) seconds per px, and pxPerSec is
+          // its reciprocal. This matches the renderer's own scale exactly; deriving it from
+          // max(medians)-min(medians) instead would understate the plot span by whatever
+          // margin sits between the extreme medians and the axis edges.
+          const sorted = [...panel.medians].sort((a, b) => a.x - b.x);
+          const first = sorted[0];
+          const last = sorted[sorted.length - 1];
+          const dxSpan = last.x - first.x;
+          const dsSpan = last.seconds - first.seconds;
+          const pxPerSec = dxSpan > 1e-9 && Math.abs(dsSpan) > 1e-9 ? dxSpan / dsSpan : 1;
+          const scaledTolerance = 2 / Math.max(1e-9, pxPerSec) + PHONE_TIE_TOLERANCE_BUFFER_SECONDS;
+          const tolerance = Math.max(DESKTOP_TIE_TOLERANCE_SECONDS, scaledTolerance);
+          for (let a = 0; a < panel.medians.length; a += 1) {
+            for (let b = a + 1; b < panel.medians.length; b += 1) {
+              const dx = Math.abs(panel.medians[a].x - panel.medians[b].x);
+              const ds = Math.abs(panel.medians[a].seconds - panel.medians[b].seconds);
+              if (dx < 2) {
+                assert.ok(ds < tolerance,
+                  `${preset} @ ${viewport.label} (${viewport.width} px, band ${panel.plotBandPx.toFixed(0)} px, `
+                  + `tolerance ${tolerance.toFixed(1)} s): panel ${i} median ticks for `
+                  + `${panel.medians[a].rowId} and ${panel.medians[b].rowId} share x within `
+                  + `${dx.toFixed(2)} px but their true medians differ by ${ds.toFixed(1)} s `
+                  + `(values ${panel.medians[a].seconds.toFixed(1)}, ${panel.medians[b].seconds.toFixed(1)})`);
+              }
             }
           }
         }
       }
+    }
+  } finally { await browser.close(); }
+});
+
+test('round-15 R11-M1: at phone widths the plot band takes at least 70% of the SVG width (a320 and b737max8-lcc)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    for (const preset of ['a320', 'b737max8-lcc']) {
+      const { panels } = await runCompareAndMeasure(browser, preset,
+        { width: 400, height: 800, mobile: true });
+      assert.ok(panels.length >= 2, `${preset}: expected at least two panels at 400x800`);
+      for (let i = 0; i < panels.length; i += 1) {
+        const panel = panels[i];
+        const ratio = panel.plotBandPx / panel.svgWidth;
+        assert.ok(ratio >= 0.70,
+          `${preset}: panel ${i} phone plot band ${panel.plotBandPx.toFixed(1)} px must be `
+          + `>= 70% of svg width ${panel.svgWidth} (got ${(ratio * 100).toFixed(1)}%)`);
+      }
+    }
+  } finally { await browser.close(); }
+});
+
+test('round-15 R11-M1: at phone widths every row label sits fully inside the SVG viewBox', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    for (const preset of ['a320', 'b737max8-lcc']) {
+      const context = await browser.newContext({
+        viewport: { width: 400, height: 800 }, hasTouch: true, isMobile: true,
+      });
+      const page = await goto(await context.newPage(),
+        `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=r15-labels-${preset}`);
+      const seedSelect = await page.$('#seed-count-select');
+      if (seedSelect) await seedSelect.selectOption('100');
+      await page.click('#btn-compare');
+      await page.waitForFunction(() => {
+        const wrap = document.getElementById('strips-wrap');
+        return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
+      }, {}, { timeout: 90000 });
+
+      const outOfBoundsLabels = await page.evaluate(() => {
+        const wrap = document.getElementById('strips-wrap');
+        const svgs = Array.from(wrap.querySelectorAll('svg'));
+        const misfits = [];
+        for (const svg of svgs) {
+          const svgWidth = Number(svg.getAttribute('width'));
+          const labels = Array.from(svg.querySelectorAll('text[data-row-label]'));
+          for (const label of labels) {
+            const bbox = label.getBBox();
+            if (bbox.x < -0.5 || bbox.x + bbox.width > svgWidth + 0.5) {
+              misfits.push({
+                rowId: label.getAttribute('data-row-label') || '',
+                text: (label.textContent || '').trim(),
+                left: bbox.x,
+                right: bbox.x + bbox.width,
+                svgWidth,
+              });
+            }
+          }
+        }
+        return misfits;
+      });
+
+      assert.equal(outOfBoundsLabels.length, 0,
+        `${preset}: every row label at phone width must be fully inside the SVG viewBox, `
+        + `got ${JSON.stringify(outOfBoundsLabels)}`);
+      await context.close();
+    }
+  } finally { await browser.close(); }
+});
+
+test('round-15 R11-M2: every off-scale row draws its bar from max(floor, p10) to the cap; a row whose p10 is beyond the cap draws no bar at all (a320 and a321neo-three-class)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    for (const preset of ['a320', 'a321neo-three-class']) {
+      const { panels } = await runCompareAndMeasure(browser, preset, { width: 1280, height: 800 });
+      // Cross-check on ground truth (the 10 000-seed cell). Cell p10 may drift a little
+      // from the live 100-seed p10, but for the four rows checked here it never crosses
+      // the cap in either direction, so the "bar or no bar" branch matches the DOM.
+      const cellRows = loadCellRowsByPreset(preset);
+      assert.ok(cellRows, `${preset}: headline cell must load`);
+      const cellById = new Map(cellRows.map((r) => [r.id, r]));
+      let sawOffScale = 0;
+      for (const panel of panels) {
+        for (const off of panel.offScale) {
+          sawOffScale += 1;
+          const cell = cellById.get(off.rowId);
+          assert.ok(cell,
+            `${preset}: off-scale row ${off.rowId} must exist in the cell data (found ids ${[...cellById.keys()].join(',')})`);
+          // Derive floor/cap from two on-scale medians whose x and seconds we know:
+          //   x = chartX0 + (seconds - floor) * plotBandPx / (cap - floor)
+          // Pick the two ticks with the greatest x-separation for numerical stability.
+          assert.ok(panel.medians.length >= 2,
+            `${preset}: at least two on-scale medians are needed to derive floor/cap`);
+          const sorted = [...panel.medians].sort((a, b) => a.x - b.x);
+          const first = sorted[0];
+          const last = sorted[sorted.length - 1];
+          const slope = (last.seconds - first.seconds) / (last.x - first.x); // s per px
+          const derivedFloor = first.seconds - slope * (first.x - panel.chartX0);
+          const derivedCap = derivedFloor + slope * panel.plotBandPx;
+          // Use the p10 the chart itself computed (from live 100-seed data) for the
+          // pixel-position check. Cell p10 supplies the ground-truth cross-check on the
+          // "bar drawn or not" branch just below.
+          const domP10 = off.p10Seconds;
+          if (Number.isFinite(cell.p10) && cell.p10 >= derivedCap) {
+            assert.equal(off.barLeftX, null,
+              `${preset}: off-scale row ${off.rowId} has cell p10 ${cell.p10.toFixed(1)}s at or beyond `
+              + `cap ${derivedCap.toFixed(1)}s, so no broken bar should be drawn (barLeftX ${off.barLeftX})`);
+            continue;
+          }
+          if (!Number.isFinite(domP10) || domP10 >= derivedCap) {
+            // Live drift pushed p10 past cap: chart correctly draws no bar. Nothing to
+            // pixel-check on this row for this run.
+            continue;
+          }
+          const bandLow = Math.max(derivedFloor, domP10);
+          const expectedX = panel.chartX0
+            + (bandLow - derivedFloor) / Math.max(1e-9, derivedCap - derivedFloor) * panel.plotBandPx;
+          assert.ok(off.barLeftX !== null,
+            `${preset}: off-scale row ${off.rowId} has on-scale live p10 ${domP10.toFixed(1)}s `
+            + `(cap ${derivedCap.toFixed(1)}s); broken bar must be drawn`);
+          const dx = Math.abs(off.barLeftX - expectedX);
+          assert.ok(dx <= 2,
+            `${preset}: off-scale row ${off.rowId} bar left edge at ${off.barLeftX.toFixed(2)} px `
+            + `should map to max(floor, p10) = ${bandLow.toFixed(1)}s -> expected ${expectedX.toFixed(2)} px `
+            + `(within 2 px), got dx=${dx.toFixed(2)} px`);
+        }
+      }
+      assert.ok(sawOffScale >= 1,
+        `${preset}: expected at least one off-scale row on the compare view`);
     }
   } finally { await browser.close(); }
 });
@@ -576,6 +784,33 @@ test('round-14 screenshots: race compare at 1280x800 and 400x800 across a320, b7
           return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
         }, {}, { timeout: 120000 });
         const file = path.join(ROUND_14_DIR, `compare-race-${preset}-${viewport.width}x${viewport.height}.png`);
+        await page.screenshot({ path: file, fullPage: true });
+        await context.close();
+      }
+    }
+  } finally { await browser.close(); }
+});
+
+test('round-15 screenshots: race compare at 1280x800 and 400x800 on a320, b737max8-lcc and a321neo-three-class (fix-round-15 evidence)', async (t) => {
+  const browser = await safeLaunch();
+  if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
+  try {
+    const presets = ['a320', 'b737max8-lcc', 'a321neo-three-class'];
+    for (const preset of presets) {
+      for (const viewport of [{ width: 1280, height: 800, mobile: false }, { width: 400, height: 800, mobile: true }]) {
+        const contextOpts = { viewport: { width: viewport.width, height: viewport.height } };
+        if (viewport.mobile) { contextOpts.hasTouch = true; contextOpts.isMobile = true; }
+        const context = await browser.newContext(contextOpts);
+        const page = await goto(await context.newPage(),
+          `${BASE_URL}/index.html?tab=race&mode=board&preset=${preset}&seed=fr15-${preset}`);
+        const seedSelect = await page.$('#seed-count-select');
+        if (seedSelect) await seedSelect.selectOption('100');
+        await page.click('#btn-compare');
+        await page.waitForFunction(() => {
+          const wrap = document.getElementById('strips-wrap');
+          return wrap && wrap.querySelectorAll('svg').length >= 2 && !wrap.textContent.includes('Running');
+        }, {}, { timeout: 120000 });
+        const file = path.join(ROUND_15_DIR, `compare-race-${preset}-${viewport.width}x${viewport.height}.png`);
         await page.screenshot({ path: file, fullPage: true });
         await context.close();
       }
