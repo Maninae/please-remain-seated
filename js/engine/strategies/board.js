@@ -114,7 +114,7 @@ const wilmaStrategy = {
 const steffenStrategy = {
   id: 'steffen',
   label: 'Steffen optimal',
-  blurb: 'Windows first, alternating rows so consecutive boarders are two rows apart, both sides of each row together, then middles, then aisles (Steffen 2008). Fastest boarding method at full compliance and no groups; reverse pyramid can beat it once family groups and non-compliance enter, which is the literature’s known fragility.',
+  blurb: 'Windows first, alternating rows so consecutive boarders are two rows apart, both sides of each row together, then middles, then aisles (Steffen 2008). The paper argues this is the theoretical minimum-time boarding under full compliance and no groups; in this sim reverse pyramid finishes ~1 min ahead of Steffen even at those settings, because our row-pair aisle already lets adjacent rows stow in parallel and denser packing wins over perfect spacing.',
   order(passengers, rng, cabin) {
     const maxByBlockSide = computeMaxDepthByBlockSide(passengers);
     const aisleCount = cabin?.aisleCount ?? countAisles(passengers);

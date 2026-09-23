@@ -87,8 +87,14 @@ describe('widebody door sharing', () => {
   });
 });
 
-describe('two-doors deplane routes passengers to the nearer door', () => {
-  it('A320 with rear door on: forward-half passengers exit through the front, aft-half through the rear', () => {
+describe('two-doors deplane routes passengers to the nearer door from where they stand', () => {
+  it('A320 with rear door on: forward-half passengers mostly exit through the front, aft-half through the rear', () => {
+    // Passengers redecide their exit door at the moment they start WALKING for it, from their
+    // current aisle cell (see pickExitDoorCell in cabin.js and NEW3-M1). Under defaults bags
+    // stay near the seat so the split remains overwhelmingly forward-front / aft-rear; the
+    // exceptions are the handful of passengers whose bag overflowed several rows away and now
+    // sit closer to the opposite door, which is exactly what the new rule is meant to route
+    // out of the counterflow trap that made two doors slower on tight-bin presets.
     const cabinOverrides = { layout: [3, 3], rows: 30, rearDoor: true };
     const { sim, cabin, passengers } = buildSim({ cabinOverrides, strategyId: 'two-doors', seed: 'two-doors-split' });
     runToDone(sim);
@@ -97,16 +103,29 @@ describe('two-doors deplane routes passengers to the nearer door', () => {
     let forwardHalfTotal = 0;
     let aftHalfViaRear = 0;
     let aftHalfTotal = 0;
+    let frontExits = 0;
+    let rearExits = 0;
     for (const passenger of passengers) {
       const isForward = passenger.row <= midRow;
       if (isForward) forwardHalfTotal += 1;
       else aftHalfTotal += 1;
       if (isForward && passenger.doorCell === cabin.frontDoorCell) forwardHalfViaFront += 1;
       if (!isForward && passenger.doorCell === cabin.rearDoorCell) aftHalfViaRear += 1;
+      if (passenger.doorCell === cabin.frontDoorCell) frontExits += 1;
+      else if (passenger.doorCell === cabin.rearDoorCell) rearExits += 1;
     }
-    // With rows split exactly at 15, every row-<=15 passenger routes to the front (nearestDoorCell
-    // returns front on ties) and every row->15 passenger routes to the rear.
-    assert.equal(forwardHalfViaFront, forwardHalfTotal, 'every forward-half passenger should target the front door');
-    assert.equal(aftHalfViaRear, aftHalfTotal, 'every aft-half passenger should target the rear door');
+    // At least 95% of each half exits via its natural door; the remainder are the smart-route
+    // cases the fix was written to enable.
+    const forwardShareViaFront = forwardHalfViaFront / forwardHalfTotal;
+    const aftShareViaRear = aftHalfViaRear / aftHalfTotal;
+    assert.ok(forwardShareViaFront >= 0.95,
+      `forward-half via front ${(forwardShareViaFront * 100).toFixed(1)}% should be >= 95%`);
+    assert.ok(aftShareViaRear >= 0.95,
+      `aft-half via rear ${(aftShareViaRear * 100).toFixed(1)}% should be >= 95%`);
+    // Both doors carry a substantial share (a regression that routed every passenger through
+    // one door would fail this).
+    const total = frontExits + rearExits;
+    assert.ok(frontExits / total >= 0.4 && frontExits / total <= 0.6,
+      `front door share ${(frontExits / total * 100).toFixed(1)}% should be inside 40-60%`);
   });
 });

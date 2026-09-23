@@ -47,6 +47,10 @@
  *     patient: boolean,        (patient passengers stay SEATED after prep expires until the
  *                               door has opened AND at least one aisle cell of their row-pair
  *                               is empty. See PASSENGER_DEFAULTS.patientFraction.),
+ *     doorWaitStartT: number|null,  (deplane only: state.t when the passenger first arrived at
+ *                               their exit door cell, cleared on admission. The fair-door pass
+ *                               ranks candidates by this so the same shared front-door server
+ *                               does not always feed aisle 0 first on a widebody.),
  *     phase: DeplanePhase | BoardPhase,
  *     vis: Vis,
  *     aisleCell: number | null,   (index into state.aisles[aisleIndex]),

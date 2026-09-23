@@ -193,6 +193,7 @@ function samplePassenger(cabin, params, rng, seatInfo) {
     aisleCell: null,
     timer: 0,
     bagsRemaining: 0,  // set at sim start to the physical bag count aboard (bagBins.length).
+    doorWaitStartT: null,  // deplane door-admission fairness key; set on arrival at the exit door cell.
     timeSplit: createEmptyTimeSplit(),
   };
 }

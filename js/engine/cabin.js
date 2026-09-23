@@ -32,7 +32,8 @@
  *   colAt(cabin, blockIndex, depth, aisleSide)          -> col   (inverse of the block/depth/side of seatColumnInfo)
  *   rowToCell(cabin, row)                               -> per-aisle cell index a passenger steps into from that row
  *   cellToRow(cabin, cell)                              -> row for a row cell, or null in a galley
- *   nearestDoorCell(cabin, row)                         -> per-aisle cell index of the door nearest that row
+ *   nearestDoorCell(cabin, row)                         -> per-aisle cell index of the door nearest that row (front on ties)
+ *   pickExitDoorCell(cabin, cell)                       -> per-aisle cell index of the door nearest that cell (front on ties)
  *   binIndex(cabin, row, blockIndex)                    -> global bin index that serves that row in that block
  *   binFirstRow(cabin, index)                           -> first row a bin serves
  *   binBlock(cabin, index)                              -> block index a bin belongs to
@@ -189,6 +190,20 @@ export function cellToRow(cabin, cell) {
 export function nearestDoorCell(cabin, row) {
   if (!cabin.rearDoor) return cabin.frontDoorCell;
   const cell = rowToCell(cabin, row);
+  return pickExitDoorCell(cabin, cell);
+}
+
+/**
+ * Per-aisle cell index of the door nearest a given aisle cell: front door on ties, or the only
+ * door if no rear. Used by the deplaning sim to (re)decide a passenger's exit door at the moment
+ * they start walking to it, so a passenger whose bag ended up several rows away from their seat
+ * routes to whichever door is closer from where they actually stand (not from the seat they
+ * left behind). Without this a rear-door passenger whose bag overflowed forward would walk to
+ * the bag, then pay counterflow all the way back to the rear door instead of using the front
+ * door that is now nearer.
+ */
+export function pickExitDoorCell(cabin, cell) {
+  if (!cabin.rearDoor) return cabin.frontDoorCell;
   const toFront = cell - cabin.frontDoorCell;
   const toRear = cabin.rearDoorCell - cell;
   return toRear < toFront ? cabin.rearDoorCell : cabin.frontDoorCell;

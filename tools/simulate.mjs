@@ -118,13 +118,19 @@ function printTable(rows, meta) {
   if (meta.rearDoor) paramNotes.push('rear door');
   if (paramNotes.length) console.log(`Params: ${paramNotes.join(', ')}`);
   console.log('');
-  console.log(`${'strategy'.padEnd(idWidth)}   median   p10     p90     tput/min`);
-  console.log(`${'-'.repeat(idWidth)}   ------   ---     ---     --------`);
+  // `first2min pax/min` is passengers per minute admitted through the door(s) over the FIRST
+  // TWO MINUTES after door-open (see doorOpenThroughput in metrics.js). It is not the whole-run
+  // rate. A tight-bin two-doors preset can front-load the ramp (twice the doors) yet still
+  // finish slower than the free-for-all, so the two columns are correctly telling you different
+  // things: the label spells that out rather than leaving `tput/min` next to `median` to look
+  // like a contradiction (NEW3-n1).
+  console.log(`${'strategy'.padEnd(idWidth)}   median   p10     p90     first2min pax/min`);
+  console.log(`${'-'.repeat(idWidth)}   ------   ---     ---     -----------------`);
   for (const row of rows) {
     const mins = `${row.medianMin.toFixed(2)}m`.padStart(8);
     const p10 = `${row.p10Min.toFixed(2)}m`.padStart(7);
     const p90 = `${row.p90Min.toFixed(2)}m`.padStart(7);
-    const tput = row.throughputMedian.toFixed(1).padStart(8);
+    const tput = row.throughputMedian.toFixed(1).padStart(17);
     console.log(`${row.id.padEnd(idWidth)}   ${mins}  ${p10}  ${p90}  ${tput}`);
   }
 }

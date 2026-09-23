@@ -38,7 +38,7 @@
  */
 
 import { CABIN_DEFAULTS, PASSENGER_DEFAULTS, MAX_SIM_SECONDS, SIM_DT_SECONDS } from './config.js';
-import { rowToCell, nearestDoorCell } from './cabin.js';
+import { rowToCell, nearestDoorCell, pickExitDoorCell } from './cabin.js';
 import { binAccessRow } from './bins.js';
 import { DeplanePhase, SimMode, Vis, EMPTY_CELL } from './types.js';
 import { accountStep, createMetrics, sampleMetrics, summarizeMetrics } from './metrics.js';
@@ -46,7 +46,7 @@ import { claimCell, createDoorServers, isCellEmpty } from './aisle.js';
 import {
   indexRowMates, computeGroupPermits, arbitrateContests, bagAccessCells, rowCellPair,
 } from './deplane-rules.js';
-import { processWalkers } from './deplane-walk.js';
+import { processWalkers, admitAtDoors } from './deplane-walk.js';
 import { DEPLANE_STRATEGY_BY_ID } from './strategies/deplane.js';
 
 const P = DeplanePhase;
@@ -98,6 +98,9 @@ export function createDeplaneSim({ cabin, passengers, bins, strategyId, params =
     routeInAisle(state, cabin);
     const groupPermits = computeGroupPermits(passengers, strategy, state);
     const reservations = arbitrateContests(state, strategy, groupPermits, rowMatesIndex, DT_EPS);
+    // Fair door admission runs BEFORE the walker pass so a walker sitting at a door cell from
+    // the previous step gets served this step. See admitAtDoors in deplane-walk.js.
+    admitAtDoors(state, doorServiceSeconds, dt);
     processWalkers(state, dt, cabin, doorServiceSeconds, reservations, DT_EPS);
     admitStanders(state, reservations, seatEgressSecondsPerPosition);
     accountReadyStanders(state, dt);
@@ -133,7 +136,14 @@ function initPassengers(passengers, cabin) {
     passenger.walkTargetCell = null;
     passenger.walkTargetPair = null;
     passenger.walkPurpose = null;
+    // `doorCell` is the door the passenger is currently targeting. The final door decision is
+    // made when the passenger begins WALKING for exit (in routeInAisle), from their current
+    // aisle cell, so a passenger whose bag ended up several rows away from their seat uses
+    // whichever door is closer from where they actually stand. The seat-row default lives
+    // here so any code that reads doorCell before the walker-exit transition (mostly tests
+    // that check the initial routing intent) sees a sane value. See NEW3-M1.
     passenger.doorCell = nearestDoorCell(cabin, passenger.row);
+    passenger.doorWaitStartT = null;
     passenger.pendingCounterflowSeconds = 0;
     // `bagCount` stays the sampled physical total for the whole run (the UI reads it as
     // "bags carried"); track progress through the bag list with `bagsRemaining`. For deplane the
@@ -207,6 +217,12 @@ function finishRetrieval(passenger, cabin, counterflowExtraSecondsPerRow) {
   if (typeof passenger.bagsRemaining === 'number' && passenger.bagsRemaining > 0) {
     passenger.bagsRemaining -= 1;
   }
+  // Re-decide the exit door from the cell we just finished retrieving at. When the bag was
+  // rows away from the seat this lets the passenger route to whichever door is closer from
+  // where they actually stand, not from the seat they left behind. The counterflow check
+  // below then measures the retrieval leg against the NOW-correct door, so a rear-door
+  // passenger whose bag overflowed forward is not charged a spurious back-to-the-rear penalty.
+  passenger.doorCell = pickExitDoorCell(cabin, passenger.aisleCell);
   if (binIdx === undefined) return;
   const accessRow = binAccessRow(cabin, passenger.row, binIdx);
   const rowsAft = accessRow - passenger.row;
@@ -245,6 +261,11 @@ function routeInAisle(state, cabin) {
         passenger.vis = Vis.MOVING;
       }
     } else {
+      // Decide the exit door from where the passenger stands right now (not from the seat row
+      // they left behind, and not from any earlier bag-retrieval walk). Tie-break to the front
+      // door (pickExitDoorCell). This turns two doors into a real net win on tight-bin cabins
+      // where bags overflow rows away from the seat (E175, high-density 737). See NEW3-M1.
+      passenger.doorCell = pickExitDoorCell(cabin, passenger.aisleCell);
       passenger.phase = P.WALKING;
       passenger.walkTargetCell = passenger.doorCell;
       passenger.walkPurpose = 'exit';
