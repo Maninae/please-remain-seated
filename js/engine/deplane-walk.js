@@ -123,7 +123,12 @@ function walkStep(passenger, state, dt, cabin, doorServiceSeconds, forbidden, dt
 
   if (passenger.walkPurpose === 'exit' && passenger.aisleCell === passenger.doorCell) {
     const door = passenger.doorCell === cabin.frontDoorCell ? state.doors.front : state.doors.rear;
-    if (door && doorTryAdmit(door, state.t, doorServiceSeconds)) {
+    // The aircraft door is not opened until state.doorOpenAtSeconds; before that the passenger
+    // is queued at the door cell, blocked, accruing aisleBlocked (this is what makes Schultz's
+    // 23 pax/min a first-minute-of-OUTFLOW figure rather than a first-minute-wall figure).
+    const doorOpenAt = state.doorOpenAtSeconds || 0;
+    const doorOpen = state.t + 1e-9 >= doorOpenAt;
+    if (doorOpen && door && doorTryAdmit(door, state.t, doorServiceSeconds)) {
       releaseCell(state, aisleIndex, passenger.aisleCell, passenger.id);
       passenger.phase = P.EXITED;
       passenger.aisleCell = null;

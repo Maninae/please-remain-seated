@@ -23,6 +23,15 @@
  *   6. Standing           READY winners claim their aisle cell and become STEPPING_OUT
  *   7. Bookkeeping        doneCount, metrics sample, MAX_SIM_SECONDS timeout
  *
+ * Door-open staging (deplane-only): the seatbelt sign is switched off at t = 0, and the aircraft
+ * door is opened at t = state.doorOpenAtSeconds (default 45 s; see PASSENGER_DEFAULTS
+ * doorOpenDelaySeconds). Every state transition above (prep, standing, contested cells,
+ * retrieval, walking) proceeds during the pre-open window; only the exit through the door is
+ * gated on state.t >= state.doorOpenAtSeconds. This is what makes Schultz 2018's 23 pax/min a
+ * first-minute-of-OUTFLOW figure, not a first-minute-wall figure. summary().totalSeconds is
+ * measured from door open; summary().stagingSeconds is the door delay; summary().wallSeconds is
+ * state.t at finish.
+ *
  * The sim never calls Math.random. `rng` is stored on state for any future strategy that needs
  * a stream (the seven deplaning strategies today are deterministic). Row-mate structure is
  * precomputed once; strategy per-step aggregates live on state.strategyScratch.
@@ -51,6 +60,7 @@ export function createDeplaneSim({ cabin, passengers, bins, strategyId, params =
   const seatEgressSecondsPerPosition = merged.seatEgressSecondsPerPosition;
   const counterflowExtraSecondsPerRow = merged.counterflowExtraSecondsPerRow;
   const doorServiceSeconds = merged.doorServiceSeconds;
+  const doorOpenAtSeconds = Math.max(0, merged.doorOpenDelaySeconds ?? 0);
 
   const aisles = new Array(cabin.aisleCount);
   for (let index = 0; index < cabin.aisleCount; index += 1) {
@@ -64,6 +74,7 @@ export function createDeplaneSim({ cabin, passengers, bins, strategyId, params =
   const state = {
     mode: SimMode.DEPLANE,
     t: 0,
+    doorOpenAtSeconds,        // no exit is admitted while state.t < state.doorOpenAtSeconds
     cabin,
     passengers,
     aisles,

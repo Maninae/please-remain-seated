@@ -48,8 +48,19 @@ export function sampleMetrics(metrics, state) {
 
 /**
  * Totals for one finished (or in-progress) run:
- *   totalSeconds, meanSplit (average per passenger), lastSplit (the last passenger to finish),
- *   throughputPerMinute over the first two minutes, and the raw series.
+ *   totalSeconds        seconds from door open to the last exit (deplane) or to the last
+ *                       passenger seated (board); this is the field-literature "deplaning time"
+ *                       and equals wallSeconds - stagingSeconds.
+ *   wallSeconds         state.t at finish (seatbelt-sign off to last exit or last seated).
+ *   stagingSeconds      state.doorOpenAtSeconds (0 for boarding; ~doorOpenDelaySeconds for
+ *                       deplaning). Reported so a UI can distinguish the two eras of the run.
+ *   meanSplit           average per-passenger time split across the four buckets.
+ *   lastSplit           the last passenger to finish (deplane: last off; board: last seated).
+ *   throughputPerMinute passengers per minute through the door over the first two minutes AFTER
+ *                       door open. Matches Schultz 2018's 23 pax/min "first minute" figure,
+ *                       which was measured on the first minute of OUTFLOW, not the first minute
+ *                       after seatbelt-sign off.
+ *   series              per-second aisle occupancy, aisle movement, and cumulative doneCount.
  */
 export function summarizeMetrics(metrics, state) {
   const meanSplit = { seatedWait: 0, aisleBlocked: 0, bags: 0, walking: 0 };
@@ -66,13 +77,18 @@ export function summarizeMetrics(metrics, state) {
   }
   const count = Math.max(1, state.passengers.length);
   for (const key of Object.keys(meanSplit)) meanSplit[key] /= count;
+  const stagingSeconds = Math.max(0, state.doorOpenAtSeconds || 0);
+  const wallSeconds = state.t;
+  const totalSeconds = Math.max(0, wallSeconds - stagingSeconds);
   return {
-    totalSeconds: state.t,
+    totalSeconds,
+    wallSeconds,
+    stagingSeconds,
     done: state.done,
     passengerCount: state.passengers.length,
     meanSplit,
     lastSplit,
-    throughputPerMinute: earlyThroughput(metrics, 120),
+    throughputPerMinute: doorOpenThroughput(metrics, stagingSeconds, 120),
     series: {
       times: metrics.times,
       aisleOccupied: metrics.aisleOccupied,
@@ -82,13 +98,20 @@ export function summarizeMetrics(metrics, state) {
   };
 }
 
-/** Passengers per minute through the door(s) over the first `windowSeconds`. */
-function earlyThroughput(metrics, windowSeconds) {
+/**
+ * Passengers per minute through the door(s) over the first `windowSeconds` AFTER door open.
+ * For boarding stagingSeconds is 0 and this reduces to the first two minutes of the run.
+ */
+function doorOpenThroughput(metrics, stagingSeconds, windowSeconds) {
+  const endTime = stagingSeconds + windowSeconds;
+  let baselineDone = 0;
   let lastIndex = -1;
   for (let index = 0; index < metrics.times.length; index += 1) {
-    if (metrics.times[index] <= windowSeconds) lastIndex = index;
+    if (metrics.times[index] <= stagingSeconds) baselineDone = metrics.doneCount[index];
+    if (metrics.times[index] <= endTime) lastIndex = index;
   }
   if (lastIndex < 0) return 0;
-  const elapsed = Math.max(metrics.times[lastIndex], 1);
-  return (metrics.doneCount[lastIndex] / elapsed) * 60;
+  const elapsed = Math.max(metrics.times[lastIndex] - stagingSeconds, 1);
+  const exitedSinceOpen = Math.max(0, metrics.doneCount[lastIndex] - baselineDone);
+  return (exitedSinceOpen / elapsed) * 60;
 }

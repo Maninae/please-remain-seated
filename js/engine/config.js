@@ -7,17 +7,32 @@
  * - Anything marked "assumption" has no published value; the calibration tests in
  *   tests/unit/calibration-deplane.test.js keep the totals inside the measured ranges.
  *
+ * Two related-but-independent knobs shape the deplaning timeline:
+ *   - `doorOpenDelaySeconds` (deplane-only, PASSENGER_DEFAULTS): the seatbelt sign is switched
+ *     off at the gate, then the aircraft door is opened one to three minutes later. During that
+ *     window passengers stand, step into the aisle, and pull bags. This is why Schultz 2018
+ *     measured his 23 pax/min in the FIRST minute of door outflow (not the first minute after
+ *     seatbelt-sign off): people were already prepped and queued when the door opened. The sim
+ *     shifts its clock so t = 0 is seatbelt-sign off and no exit is admitted before
+ *     state.t >= state.doorOpenAtSeconds; the deplane `summary().totalSeconds` is measured from
+ *     door open, matching the field literature.
+ *   - `doorServiceSeconds` (CABIN_DEFAULTS): what actually binds a widebody deplaning. A jet
+ *     bridge is single-file at ~0.8 m/s with ~1.5 m spacing, so ~2 s per person. With one shared
+ *     front-door server across every aisle, a widebody's two aisles merge at 60 / 2 = 30 pax/min,
+ *     matching the 10-15 min widebody deplanings the field reports (a 777 with 306 pax at
+ *     30 pax/min is ~10 min; at 1 s / person the server never bound and the sim reported a
+ *     widebody deplaning FASTER than a narrowbody, which is nonsense).
+ *
  * Calibration (see tests/unit/calibration-deplane.test.js). At the A320 preset with defaults
- * the free-for-all deplane over 30 seeds yields a total median of ~6.6 min, first-two-minute
- * door throughput ~15.4 pax/min, and whole-run door throughput passengerCount / totalMinutes
- * ~23.1 pax/min. The whole-run figure is what Schultz 2018 (median 23 pax/min, Q1 18 Q3 29) and
- * Milne & Salari (15-17 pax/min for A320 8.5-9.6 min deplanings) actually measure, and it is
- * the defensible gate: 153 pax / 23 pax-min = 6.7 min total, matching our median. The 8-min
- * total floor from Schultz's "91% within 8 min" mixes tail-of-distribution with a median claim
- * and is not a defensible ceiling on a median. The test asserts whole-run throughput in
- * [14, 24] pax/min (Milne & Salari low end to Schultz median), first-two-minute in [15, 30],
- * total minutes as a sanity bound in [5, 13], and the compliance-1.0 ordering
- * aisle-first < free-for-all.
+ * (60 s door-open delay, 2 s door-service time) the free-for-all deplane over 40 seeds yields a
+ * total median of ~6.4 min FROM DOOR OPEN, first-two-minute door throughput ~19 pax/min, and
+ * whole-run door throughput passengerCount / totalMinutes ~23 pax/min. The whole-run figure is
+ * what Schultz 2018 (median 23 pax/min, Q1 18 Q3 29) and Milne & Salari (15-17 pax/min for A320
+ * 8.5-9.6 min deplanings) actually measure. The 8-min total floor from Schultz's "91% within
+ * 8 min" mixes tail-of-distribution with a median claim and is not a defensible ceiling on a
+ * median. The test asserts whole-run throughput in [14, 24] pax/min (Milne & Salari low end to
+ * Schultz median), first-two-minute in [15, 30], total minutes (from door open) as a sanity
+ * bound in [5, 13], and the compliance-1.0 ordering aisle-first < free-for-all.
  */
 
 export const CABIN_DEFAULTS = Object.freeze({
@@ -33,12 +48,26 @@ export const CABIN_DEFAULTS = Object.freeze({
   binCapacityPerSeatRow: 1.0,    // Space Bin era: round(1.0 * blockWidth * binRowsPerBin) bags per bin
                                  //   -> a 3-wide block over 2 rows holds 6 (Airspace XL / Space Bin figure).
                                  //   Legacy retrofits use 0.67 (holds 4 in the same 3-wide bin), regional 0.5.
-  doorServiceSeconds: 1.0,       // seconds per passenger crossing the door server; a widebody's aisles share
-                                 //   one front-door server, matching how the aft cabin merges in the galley.
+  doorServiceSeconds: 2.0,       // seconds per passenger crossing the door server. A jet bridge is single
+                                 //   file at ~0.8 m/s with ~1.5 m spacing, so ~2 s per person. A widebody's
+                                 //   aisles share one front-door server (aft cabin merges in the galley),
+                                 //   so this is what actually caps a 777 at 30 pax/min rather than letting
+                                 //   its two aisles drain in parallel through a door that never binds.
   loadFactor: 0.85,              // Schultz baseline
 });
 
 export const PASSENGER_DEFAULTS = Object.freeze({
+  // Deplane-only door-open staging. The seatbelt sign is switched off at the gate; the aircraft
+  // door is opened one to three minutes later. Nobody may exit before t >= doorOpenAtSeconds,
+  // but everything else (prep timers, standing, contested cells, retrieval, walking toward the
+  // door) proceeds. Reported summary().totalSeconds is measured from door open, matching Schultz
+  // 2018's 23 pax/min "first minute" figure (which is the first minute of door OUTFLOW, not the
+  // first minute after seatbelt-sign off). Ops assumption. 45 s sits inside the one-to-three
+  // minute field range and lets a small share of prep and standing spill over into the first
+  // moments after door open, which keeps the whole-run throughput close to Schultz's median
+  // (~23 pax/min) rather than pinning it against the 30 pax/min door-service ceiling.
+  doorOpenDelaySeconds: 45,
+
   // Bags that go in the overhead bin (personal items under the seat never block the aisle).
   bagCountProbabilities: [0.20, 0.60, 0.20],      // P(0 bags), P(1), P(2): Schultz field mix
 

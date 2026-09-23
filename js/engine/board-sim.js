@@ -72,6 +72,7 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
   const state = {
     mode: SimMode.BOARD,
     t: 0,
+    doorOpenAtSeconds: 0,   // boarding has no gate-side staging; the door is open from t = 0.
     cabin,
     passengers,
     aisles,

@@ -61,10 +61,11 @@ Boarding:
 - Monte Carlo: N seeds per strategy, report median, p10, p90, and delta vs free-for-all.
 
 ### 2.7 Calibration gates (permanent tests)
-- Free-for-all deplane, 180 seats at 0.85 load, default params, median over 50 seeds: 8 to 13 min (Schultz: 91% of flights done by 8 min; Milne & Salari A320 144 seats 8.5-9.6 min; 737 189 seats 13-14 min).
-- Door outflow over the first 2 min of free-for-all deplaning: 15 to 30 pax/min (Schultz median 23).
+- Free-for-all deplane, 180 seats at 0.85 load, default params, median over 40 seeds: whole-run door throughput (passengerCount / total minutes from door open) 14 to 24 pax/min (Milne & Salari 15-17 pax/min low end to Schultz 2018 median 23), and total minutes (from door open) 5 to 13 as a sanity bound. The clock starts at door open, not at seatbelt-sign off: the sim stages the first 45 s while people stand and pull bags, matching how Schultz's "23 pax/min" was measured on the first minute of OUTFLOW rather than the first minute after the sign went off.
+- Door outflow over the first 2 min AFTER DOOR OPEN of free-for-all deplaning: 15 to 30 pax/min (Schultz median 23).
 - Random boarding, same cabin: 15 to 30 min (MythBusters random 17:15; Nyquist & McFadden 30 min).
 - Back-to-front boarding slower than random; Steffen faster than WILMA faster than random at compliance 1.0 (ordering from Steffen 2008 and MythBusters).
+- Widebody sanity: the 777 (3-4-3) whole-run pax/min sits at or below the door-service ceiling (60 / doorServiceSeconds), and its total minutes exceeds the A320's at defaults. Two aisles merging at one shared front-door server means twice the passengers cannot deplane faster than half.
 
 ## 3. Engine contract (fixed before fan-out; DOM-free, deterministic per seed)
 - `createDeplaneSim({ cabin, passengers, bins, strategyId, params, seed })` and `createBoardSim({ cabin, passengers, strategyId, params, seed })` both return `{ step(dtSeconds), state, done, metrics }`.

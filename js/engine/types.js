@@ -4,7 +4,11 @@
  * Sim state (`state`), produced by deplane-sim.js and board-sim.js, read by the renderer and metrics:
  *   {
  *     mode: 'deplane' | 'board',
- *     t: seconds since the start,
+ *     t: seconds since the start (seatbelt-sign off for deplane; door open for board),
+ *     doorOpenAtSeconds: seconds after t=0 at which the aircraft door opens; deplane exits are
+ *       gated on state.t >= state.doorOpenAtSeconds. Boarding sets this to 0. Everything else
+ *       (prep, standing, contested cells, retrieval, walking up to the door) proceeds during
+ *       the pre-open era on deplane.
  *     cabin: see cabin.js (carries layout, aisleCount, per-column geometry, per-bin capacities),
  *     passengers: Passenger[]  (passengers[i].id === i),
  *     aisles: Int32Array[]     one per aisle, length cabin.cellsPerAisle, holding passenger ids or EMPTY_CELL,
