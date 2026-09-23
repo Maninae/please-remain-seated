@@ -6,8 +6,9 @@
  *   - Schultz 2018 measured median door outflow 23 pax/min (Q1 18, Q3 29) IN THE FIRST MINUTE
  *     OF OUTFLOW (not the first minute after seatbelt-sign off). 153 / 23 = 6.7 min from door
  *     open, matching what the sim produces at defaults.
- *   - Milne & Salari 2016 report A320 free-for-all deplanings of 8.5-9.6 min at 15-17 pax/min
- *     whole-run door rate.
+ *   - Wald, Harmon & Klabjan 2014 (JATM 36:101-109, doi 10.1016/j.jairtraman.2014.01.001)
+ *     report a 15-17 pax/min average deplaning rate on a full A320; at 144 seats that
+ *     arithmetic gives 8.5-9.6 min as a derived total.
  *   - Schultz's "91% of flights done within 8 min" is a tail-of-distribution claim, not a floor
  *     on the median; we do not use it as an assertion.
  *
@@ -17,8 +18,9 @@
  * (aisle-first faster than free-for-all at compliance 1.0, no groups) is unchanged.
  *
  * Assertions:
- *   - whole-run pax/min: EVERY seed family's median in [14, 27]  (Milne & Salari low end to
- *     comfortably above Schultz median; Schultz Q3 is 29). Round 3 flagged that the gate was
+ *   - whole-run pax/min: EVERY seed family's median in [14, 27]  (Wald, Harmon & Klabjan
+ *     2014 low end at 15 to comfortably above Schultz median 23; Schultz Q3 is 29). Round 3
+ *     flagged that the gate was
  *     seed-dependent when it read [14, 24] on the single `calib-` prefix (round-01 M5): swapping
  *     the prefix flipped a marginal pass into a fail on other families. Testing multiple prefixes
  *     inside one range that covers ALL of them turns "coin on its edge" into a real gate.

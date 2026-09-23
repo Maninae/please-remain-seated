@@ -29,13 +29,13 @@ Literature values the simulator's defaults are drawn from. Every number carries 
 ## Deplaning
 
 - Door outflow in the first minute: Q0.25 = 18, median = 23, Q0.75 = 29 pax/min. 91% of flights finish deboarding by 8 min; deplaning is ~53% faster than boarding on the same fleet. (Schultz 2018, aerospace5010027)
-- Structured deplaning: >40% reduction on full aircraft; ~30% average saving estimated at ~27M passenger-minutes or ~$2B per year in the US. Recommended for domestic high-load flights: one-column (aisle column front to back, then middle, then window). (Milne & Salari, JATM 43, 2015, https://www.sciencedirect.com/science/article/abs/pii/S0969699714000027)
+- Structured deplaning: >40% reduction on full aircraft; ~30% average saving estimated at ~27M passenger-minutes or ~$2B per year in the US. Recommended for domestic high-load flights: one-column (aisle column front to back, then middle, then window). (Wald, Harmon & Klabjan, "Structured deplaning via simulation and optimization", JATM 36:101-109, 2014, doi 10.1016/j.jairtraman.2014.01.001, https://www.sciencedirect.com/science/article/abs/pii/S0969699714000027)
 - Lorentzian-geometry treatment of column-wise exit, similar order of gains. (Bachmat et al., "Deplaning", 2013, https://www.academia.edu/4621663/Deplaning)
-- Stand plus collect personal item: 1-2 s. (Milne & Salari 2015)
+- Stand plus collect personal item: 1-2 s. (Unverified; not confirmed against a primary source. Retained as a modelling assumption; see the assumptions table on the About tab.)
 - Retrieve a bag from the bin: ~9-14 s per bag, the Schultz stow distribution reversed. (derived)
 - Bag stored 1-3 rows away adds ~3-6 s per row of counterflow. (Bachmat 2013)
-- Baseline yielding is strict row-by-row first-come-first-served; Milne & Salari vary politeness explicitly.
-- Measured totals: A320 (144 seats) at 15-17 pax/min through the front door, 8.5-9.6 min. A full 189-seat 737 at 14 pax/min through one door, ~13-14 min. (Milne & Salari 2015 and industry observation cited there)
+- Baseline yielding is strict row-by-row first-come-first-served; a politeness parameter for a walker letting a row-mate step ahead (P=0.9) is an unverified behavioural assumption in this project.
+- Average deplaning rate on a full A320: 15-17 pax/min. At 144 seats that arithmetic gives 8.5-9.6 min as a derived total (rather than a directly measured total). A full 189-seat 737 at 14 pax/min through one door yields ~13-14 min by the same arithmetic. (Wald, Harmon & Klabjan 2014, JATM 36:101-109 and industry observation cited there)
 - MythBusters tested boarding only. No publicly documented airline alternating-rows deplaning trial could be verified.
 
 ## Cabin geometry

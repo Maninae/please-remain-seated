@@ -263,8 +263,15 @@ function findHeadlineCell(indexObject, mode, preset) {
  */
 export async function loadCellWithFallback({ indexObject, mode, preset, knobs, primary }) {
   const tried = [];
-  const seen = new Set([primary.file]);
-  const attempts = [{ meta: primary, label: 'primary' }];
+  const seen = new Set();
+  const attempts = [];
+  // N6-B1: primary may be null when the caller finds no exact match in the index (a
+  // partial precompute has not yet written this cell). We still fall through to preview
+  // and headline neighbours below; primary just does not enter the attempt list.
+  if (primary && primary.file) {
+    seen.add(primary.file);
+    attempts.push({ meta: primary, label: 'primary' });
+  }
 
   // Preview equivalent of the primary: same (mode, preset, primary.knobs) in the preview
   // index, written at PREVIEW_SEEDS so its filename is a distinct file. This covers the
@@ -302,7 +309,7 @@ export async function loadCellWithFallback({ indexObject, mode, preset, knobs, p
         // Single info line so a partial run does not spam the console.
         // eslint-disable-next-line no-console
         console.info(
-          `Rankings: primary cell ${primary.file} unavailable; using ${label} fallback ${meta.file}`,
+          `Rankings: primary cell ${primary ? primary.file : `(none for ${mode}/${preset})`} unavailable; using ${label} fallback ${meta.file}`,
         );
       }
       return { cellData, cellMeta: meta, wasFallback: i > 0 };

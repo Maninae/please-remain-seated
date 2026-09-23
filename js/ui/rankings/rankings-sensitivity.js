@@ -158,10 +158,16 @@ function renderOneSlope(knob, cells, topFive, defaults) {
     }, `${Math.round(seconds / 60)}m`);
   }
   if (yMin > 0) {
+    // N6-m4: place the truncation note ABOVE the yMin tick, right of the y-axis, inside the
+    // plot. The previous position at (plotX0 - 8, plotY1 + 13) overlapped the first
+    // x-axis label ("roomy bins", "typical bags", etc.) in four of five panels; measured
+    // bbox overlap up to 16 px. Placing it above the yMin tick keeps it clear of every
+    // x-axis label at every knob's grid.
+    const yMinTickY = plotY1;
     appendText(svg, {
-      x: plotX0 - 8, y: plotY1 + 13,
+      x: plotX0 + 4, y: yMinTickY - 3,
       'font-size': AXIS_FONT_PX - 1,
-      'text-anchor': 'end',
+      'text-anchor': 'start',
       fill: THEME.ink,
       'fill-opacity': 0.45,
       'font-style': 'italic',
@@ -216,8 +222,14 @@ function renderOneSlope(knob, cells, topFive, defaults) {
     const minY = rightEnds[i - 1].labelY + MIN_LABEL_GAP;
     if (rightEnds[i].labelY < minY) rightEnds[i].labelY = minY;
   }
-  // Upward pass: if the last label was pushed below the plot's bottom, or if a label sits
-  // farther from its true endpoint than the one below it, pull the prior labels up.
+  // N6-n9: upward pass explicitly clamps the last label at the plot bottom first, then
+  // pulls priors up. The old code path relied on the downward pass to push labels below
+  // the plot and never triggered on a 200 px frame; on a shorter panel it would let the
+  // last label fall off. Now the bottom clamp is explicit so the pass is not dead code.
+  const plotBottomLimit = plotY1 - LABEL_FONT_PX / 2;
+  if (rightEnds.length > 0 && rightEnds[rightEnds.length - 1].labelY > plotBottomLimit) {
+    rightEnds[rightEnds.length - 1].labelY = plotBottomLimit;
+  }
   for (let i = rightEnds.length - 2; i >= 0; i -= 1) {
     const maxY = rightEnds[i + 1].labelY - MIN_LABEL_GAP;
     if (rightEnds[i].labelY > maxY) rightEnds[i].labelY = maxY;
@@ -377,7 +389,10 @@ function truncateLabel(label) {
 function niceCeiling(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) return 60;
   const minutes = seconds * 1.05 / 60;
-  const steps = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+  // N6-m9: finer ladder so a panel whose slowest line is 21 min gets a 22 min ceiling
+  // rather than snapping up to 30 min. The old [20, 30, 45, ...] jump left five panels
+  // using under half their frame.
+  const steps = [1, 2, 3, 5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30, 35, 40, 45, 50, 60, 75, 90, 120];
   for (let i = 0; i < steps.length; i += 1) {
     if (minutes <= steps[i]) return steps[i] * 60;
   }
@@ -393,7 +408,10 @@ function niceCeiling(seconds) {
 function computeSlopeFloor(allYs, yMax) {
   if (!Array.isArray(allYs) || allYs.length === 0) return 0;
   const minY = Math.min(...allYs);
-  if (minY < 4 * 60) return 0;                    // below 4 minutes, keep a real zero baseline
+  // N6-m9 partner: relax the 4-minute cutoff to 2 minutes here too so a panel whose
+  // series sit at 3 to 5 minutes earns a floor. The old rule kept the zero baseline for
+  // deplane panels where every line clustered in a 90-second window between 3 and 5 min.
+  if (minY < 2 * 60) return 0;                    // below 2 minutes, keep a real zero baseline
   if (minY < yMax * 0.25) return 0;               // too close to zero, keep the zero baseline
   const breather = Math.max(60, (yMax - minY) * 0.15);
   const raw = Math.max(0, minY - breather);

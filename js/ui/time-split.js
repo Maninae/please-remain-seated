@@ -62,10 +62,14 @@ function pickPassenger(lane, passengers, mode) {
   // same elapsed stopwatch in both lanes. Both bars then printed identical totals for roughly
   // 75% of the race, contradicting the live-gap sentence that said one lane was 30 passengers
   // ahead. Fix: while the race is running, "last" means the slowest passenger who has actually
-  // exited so far (rank by total split time among the done set). If nobody has exited yet, fall
-  // back to the running average with a caption that says so, instead of pretending it is a
-  // "last off" who has not left.
-  const doneOnly = passengers.filter((p) => p && p.vis === 'done');
+  // finished so far. Deplane finishes into vis === 'done'; board finishes into phase 'seated'
+  // (Vis.DONE is deplane-only, per types.js). Ranking is by accumulated split time within the
+  // finished set. If nobody has finished yet, fall back to the running average with a caption
+  // that says so, instead of pretending it is a "last off" who has not left.
+  const isFinished = mode === 'board'
+    ? (p) => p && p.phase === 'seated'
+    : (p) => p && p.vis === 'done';
+  const doneOnly = passengers.filter(isFinished);
   const emptyVerb = mode === 'board' ? 'seated yet' : 'off yet';
   if (doneOnly.length === 0) {
     return { split: averageSplit(passengers), caption: `average so far, nobody ${emptyVerb}` };

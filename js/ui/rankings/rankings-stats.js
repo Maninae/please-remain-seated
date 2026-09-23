@@ -37,12 +37,15 @@ function fmtInt(value) {
 }
 
 function fmtPersonYears(value) {
-  if (!Number.isFinite(value) || value <= 0) return '0.0';
-  if (value >= 1000) return Math.round(value).toLocaleString('en-US');
-  // N5-M6: consistent precision within the comparison column. The old rule flipped from two
-  // decimals at value < 10 to one decimal at value >= 10, so 8.79 and 26.6 and 26.5 landed
-  // in the same column at different precisions. One decimal everywhere below 1000 keeps the
-  // column columnar.
+  if (!Number.isFinite(value)) return '0.0';
+  // Print the sign honestly. A one-sided Math.max(0, ...) clamp used to hide negative
+  // comparison values as "0.0", which flattered the site's own thesis on presets where the
+  // airlines lose to random (N6-B2). Now negative values print with a minus sign so a
+  // reader can see the direction directly.
+  const abs = Math.abs(value);
+  if (abs >= 1000) return `${value < 0 ? '-' : ''}${Math.round(abs).toLocaleString('en-US')}`;
+  // N5-M6: consistent precision within the comparison column. One decimal everywhere below
+  // 1000 keeps the column columnar. Negative values keep the sign.
   return value.toFixed(1);
 }
 
@@ -132,42 +135,50 @@ export function renderStatTiles(host, { strategies, mode, passengerCount }) {
   if (mode === 'board' && refs.bestTextbook && refs.random && refs.bestAirline && refs.averageAirlineIdle != null) {
     const compGrid = document.createElement('div');
     compGrid.className = 'rankings-stats-comparisons';
-    const bestTextbookYears = personYearsFromPersonMinutes(Math.max(0, refs.random.idlePersonMinutesMedian - refs.bestTextbook.idlePersonMinutesMedian));
-    const bestAirlineYears = personYearsFromPersonMinutes(Math.max(0, refs.random.idlePersonMinutesMedian - refs.bestAirline.idlePersonMinutesMedian));
-    const airlineGapYears = personYearsFromPersonMinutes(Math.max(0, refs.averageAirlineIdle - refs.bestTextbook.idlePersonMinutesMedian));
-    // N5-M6: this is the sentence version of the whole tab, rendered as a number for the
-    // first time. The delta can be positive or negative depending on which direction the
-    // mean airline lies.
-    const avgAirlineVsRandom = Math.max(0, refs.random.idlePersonMinutesMedian - refs.averageAirlineIdle);
-    const avgAirlineVsRandomYears = personYearsFromPersonMinutes(avgAirlineVsRandom);
+    // N6-B2: no clamp. The comparison rows can go negative when the airlines lose to
+    // random, and the row label flips to what the data says ("airlines are 18.3
+    // person-years / day WORSE"). Round 5 clamped these at zero, which flattered the site's
+    // own thesis on four presets where the true figure is -32.2 person-years per day.
+    const bestTextbookYears = personYearsFromPersonMinutes(refs.random.idlePersonMinutesMedian - refs.bestTextbook.idlePersonMinutesMedian);
+    const bestAirlineYears = personYearsFromPersonMinutes(refs.random.idlePersonMinutesMedian - refs.bestAirline.idlePersonMinutesMedian);
+    const airlineGapYears = personYearsFromPersonMinutes(refs.averageAirlineIdle - refs.bestTextbook.idlePersonMinutesMedian);
+    const avgAirlineVsRandomYears = personYearsFromPersonMinutes(refs.random.idlePersonMinutesMedian - refs.averageAirlineIdle);
     for (const row of [
-      {
+      buildSignedComparisonRow({
         head: 'Average airline vs random order',
         detail: `${refs.averageAirlineCount} airline procedures, mean idle vs ${refs.random.label} · the whole thesis, as a number`,
-        value: `${fmtPersonYears(avgAirlineVsRandomYears)} person-years / day`,
+        value: avgAirlineVsRandomYears,
+        betterWord: 'better',
+        worseWord: 'worse',
         emphasize: true,
-      },
-      {
+      }),
+      buildSignedComparisonRow({
         head: 'Best textbook method vs random order',
         detail: `${refs.bestTextbook.label} vs ${refs.random.label}`,
-        value: `${fmtPersonYears(bestTextbookYears)} person-years / day`,
-      },
-      {
+        value: bestTextbookYears,
+        betterWord: 'better',
+        worseWord: 'worse',
+      }),
+      buildSignedComparisonRow({
         head: 'Best airline vs random order',
         detail: `${refs.bestAirline.label} vs ${refs.random.label}`,
-        value: `${fmtPersonYears(bestAirlineYears)} person-years / day`,
-      },
-      {
+        value: bestAirlineYears,
+        betterWord: 'better',
+        worseWord: 'worse',
+      }),
+      buildSignedComparisonRow({
         head: 'Average airline vs best textbook method',
         detail: `${refs.averageAirlineCount} airline procedures, mean idle vs ${refs.bestTextbook.label}`,
-        value: `${fmtPersonYears(airlineGapYears)} person-years / day`,
-      },
+        value: airlineGapYears,
+        betterWord: 'worse',   // this row already runs the other way (airline idle - textbook), so positive = airline is worse
+        worseWord: 'better',
+      }),
     ]) {
       compGrid.appendChild(comparisonRow(row));
     }
     const foot = document.createElement('p');
     foot.className = 'rankings-stats-comparisons-note';
-    foot.textContent = 'Every per-day number is a scaled estimate; the sim runs at 153 pax on an A320, not a fleet-weighted mix.';
+    foot.textContent = `Every per-day number is a scaled estimate; the sim runs at ${passengerCount} pax on this cabin, not a fleet-weighted mix.`;
     host.appendChild(compGrid);
     host.appendChild(foot);
   }
@@ -221,6 +232,28 @@ function tile({ label, subLabel, value, unit, subUnit, infoKey, dataAttrs }) {
     wrap.appendChild(sub);
   }
   return wrap;
+}
+
+/**
+ * Turn a signed comparison value into the row descriptor comparisonRow() expects.
+ *
+ * If value > 0 the first-named side is `betterWord` (usually "better"); if value < 0 it is
+ * `worseWord`. The printed number is the absolute value with the sign carried in the label
+ * word so a reader can see the direction at a glance without decoding a minus sign. A value
+ * inside +/- 0.05 person-years / day prints as "0.1 person-years / day" without a direction
+ * word because it is inside rounding noise.
+ */
+function buildSignedComparisonRow({ head, detail, value, betterWord, worseWord, emphasize }) {
+  const abs = Math.abs(value);
+  let valueText;
+  if (abs < 0.05) {
+    valueText = `${fmtPersonYears(0)} person-years / day`;
+  } else if (value >= 0) {
+    valueText = `${fmtPersonYears(abs)} person-years / day ${betterWord}`;
+  } else {
+    valueText = `${fmtPersonYears(abs)} person-years / day ${worseWord}`;
+  }
+  return { head, detail, value: valueText, emphasize };
 }
 
 function comparisonRow({ head, detail, value, emphasize }) {

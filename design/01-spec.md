@@ -22,12 +22,12 @@ Deplaning is slow because the aisle is a single-lane road and every overhead-bin
 | Bin bags | 0 / 1 / 2 with p = 0.20 / 0.60 / 0.20 | Schultz field mix |
 | Bag location | own bin; overflow goes to nearest bin with space, searching forward first, then aft | Bin capacity model |
 | Free walking speed | 0.8 m/s (0.5 s per cell); per-passenger lognormal jitter sigma 0.15 | Schultz 2018 |
-| Prep time (seatbelt-off to ready) | lognormal median 2 s, sigma 0.8; a distracted 10% add uniform 10-30 s | Milne & Salari 2 s; phone-checker tail is our assumption, low confidence |
+| Prep time (seatbelt-off to ready) | lognormal median 2 s, sigma 0.8; a distracted 10% add uniform 10-30 s | Assumption (behavioural; 1-2 s stand-and-collect is folklore in the deplaning literature, unverified against a primary source; the phone-checker tail is our assumption, low confidence) |
 | Bag retrieval per bag | Weibull k=1.7, lambda=10 s (mean 9 s); second bag +60% | Derived from Schultz stow Weibull(1.7, 16 s) scaled by measured deplane/board outflow ratio |
 | Bag stow per bag (boarding) | Weibull k=1.7, lambda=16 s (mean 14.3 s); second bag +8 s | Schultz 2018, 323 events |
 | Seat egress (deplane) | 2 s per seat position crossed (aisle 2 s, middle 4 s, window 6 s) | Our assumption, calibrated |
 | Seat interference (boarding) | 5 s per movement; movements 1 / 4 / 5 / 9 by blocking case | Schultz 2018 |
-| Politeness | P(walker yields an empty cell to a row-mate stepping out) = 0.9 | Milne & Salari (row-by-row yielding near universal) |
+| Politeness | P(walker yields an empty cell to a row-mate stepping out) = 0.9 | Assumption (behavioural; the yielding parameter is not verified against a primary source) |
 | Compliance | P(passenger obeys the announced strategy) = 0.85 | Schultz conformance |
 | Group | 25% of passengers travel in groups of 2-4 in adjacent seats; groups move together and ignore strategy order | Known Steffen killer; assumption |
 | Door arrivals (boarding) | exponential inter-arrival, mean 3.7 s | Schultz baseline |
@@ -44,7 +44,7 @@ QUEUED (at door, exponential arrivals in strategy order) -> WALKING aft -> STOWI
 Deplaning (all take compliance and group fraction; non-compliant passengers behave free-for-all):
 1. Free-for-all (baseline, reality)
 2. Row-by-row front to back (row r waits until row r-1 has left its seats)
-3. Aisle seats first, then middle, then window (Milne & Salari one-column; their >40% claim is the thing to test)
+3. Aisle seats first, then middle, then window (Wald, Harmon & Klabjan 2014 one-column; their >40% claim is the thing to test)
 4. Alternating rows (even rows first, then odd) so retrievals happen in parallel one row apart
 5. Two doors (rows past the split exit aft)
 6. Bagless first
@@ -61,7 +61,7 @@ Boarding:
 - Monte Carlo: N seeds per strategy, report median, p10, p90, and delta vs free-for-all.
 
 ### 2.7 Calibration gates (permanent tests)
-- Free-for-all deplane, 180 seats at 0.85 load, default params, median over 40 seeds: whole-run door throughput (passengerCount / total minutes from door open) 14 to 24 pax/min (Milne & Salari 15-17 pax/min low end to Schultz 2018 median 23), and total minutes (from door open) 5 to 13 as a sanity bound. The clock starts at door open, not at seatbelt-sign off: the sim stages the first 45 s while people stand and pull bags, matching how Schultz's "23 pax/min" was measured on the first minute of OUTFLOW rather than the first minute after the sign went off.
+- Free-for-all deplane, 180 seats at 0.85 load, default params, median over 40 seeds: whole-run door throughput (passengerCount / total minutes from door open) 14 to 27 pax/min (Wald, Harmon & Klabjan 2014 low end at 15 pax/min to comfortably above Schultz 2018 median 23), and total minutes (from door open) 5 to 13 as a sanity bound. The clock starts at door open, not at seatbelt-sign off: the sim stages the first 45 s while people stand and pull bags, matching how Schultz's "23 pax/min" was measured on the first minute of OUTFLOW rather than the first minute after the sign went off.
 - Door outflow over the first 2 min AFTER DOOR OPEN of free-for-all deplaning: 15 to 30 pax/min (Schultz median 23).
 - Random boarding, same cabin: 15 to 30 min (MythBusters random 17:15; Nyquist & McFadden 30 min).
 - Back-to-front boarding slower than random; Steffen faster than WILMA faster than random at compliance 1.0 (ordering from Steffen 2008 and MythBusters).

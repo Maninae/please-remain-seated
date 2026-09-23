@@ -51,7 +51,7 @@ const ASSUMPTION_ROWS = Object.freeze([
   {
     label: 'Prep distribution (seatbelt off to ready to stand)',
     value: 'lognormal, median 3 s, sigma 1.0',
-    source: 'Assumption (Milne & Salari 1 to 2 s widened to a tail)',
+    source: 'Assumption (behavioural; no primary source verified)',
     kind: 'assumption',
   },
   {
@@ -63,8 +63,8 @@ const ASSUMPTION_ROWS = Object.freeze([
   {
     label: 'Politeness (let a row-mate step ahead)',
     value: 'P = 0.9',
-    source: 'Milne and Salari 2016',
-    kind: 'measured',
+    source: 'Assumption (behavioural; the yielding parameter is not verified in a primary source)',
+    kind: 'assumption',
   },
   {
     label: 'Walking speed, bag stow time, door outflow',
@@ -81,7 +81,7 @@ const ASSUMPTION_ROWS = Object.freeze([
   {
     label: 'One-column (aisle-first) deplaning claim',
     value: 'aisle-first faster than free-for-all',
-    source: 'Milne and Salari 2016, JATM 43',
+    source: 'Wald, Harmon and Klabjan 2014, JATM 36:101-109 (structured deplaning >40% reduction), doi 10.1016/j.jairtraman.2014.01.001',
     kind: 'measured',
   },
   {
@@ -251,10 +251,10 @@ function buildCalibrationSection() {
     <ul class="about-list">
       <li>A320 default carries 153 passengers (180 seats at 0.85 load factor).</li>
       <li>Schultz measured a median door outflow of 23 pax/min (Q1 18, Q3 29) in the first minute of outflow.</li>
-      <li>Milne and Salari 2016 report A320 deplaning at 15 to 17 pax/min whole-run door rate, 8.5 to 9.6 minutes.</li>
+      <li>Wald, Harmon and Klabjan 2014 (JATM 36:101-109) report a 15 to 17 pax/min average deplaning rate on a full A320; at 144 seats that arithmetic gives an 8.5 to 9.6 minute total, a derived figure rather than one they measure directly.</li>
       <li data-about-whole-run-gate>${formatWholeRunGateSentence()}</li>
       <li data-about-first-two-min-gate>${formatFirstTwoMinGateSentence()}</li>
-      <li>The model runs at the fast end of that band. Whole-run throughput lands around 23 to 25 pax/min at defaults, close to Schultz's median and above Milne and Salari's range. The 45-second staging window (see the assumptions table) is what puts it there.</li>
+      <li>The model runs at the fast end of that band. Whole-run throughput lands around 23 to 25 pax/min at defaults, close to Schultz's median and above the Wald, Harmon and Klabjan range. The 45-second staging window (see the assumptions table) is what puts it there.</li>
     </ul>
     <p class="about-inline">Gates live in <a href="${REPO_BLOB_BASE}tests/unit/calibration-deplane.test.js" target="_blank" rel="noopener">tests/unit/calibration-deplane.test.js</a> and <a href="${REPO_BLOB_BASE}tests/unit/calibration-board.test.js" target="_blank" rel="noopener">tests/unit/calibration-board.test.js</a>. A bound is never widened to make a test pass.</p>
   `;

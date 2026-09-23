@@ -21,7 +21,7 @@ export function mountExplainer({ store }) {
       <ul>
         <li>${modeLine}</li>
         <li>Every bag pull or stow blocks the aisle slot it happens in. Nothing behind a stopped person moves. That is the whole story.</li>
-        <li>People walk about 0.8 metres per second. Getting up takes about 2 to 3 seconds for most people, longer for anyone on a phone. Pulling a bag takes about 9 seconds; stowing one takes longer. The numbers come from research by Schultz (2018) and Milne and Salari (2016).</li>
+        <li>People walk about 0.8 metres per second. Getting up takes about 2 to 3 seconds for most people, longer for anyone on a phone. Pulling a bag takes about 9 seconds; stowing one takes longer. The numbers come from research by Schultz (2018) and Wald, Harmon and Klabjan (2014).</li>
         <li>How well people follow the announced order matters more than which order gets announced. When most people ignore the rule, every fancy strategy collapses into free-for-all.</li>
         <li>Opening the back door is by far the biggest win. Each half of the plane drains through its own exit instead of queueing behind the front door.</li>
         <li>Every strategy above rides the same physics. Change a slider and the winner may flip. That is why airlines cannot promise a boarding time.</li>

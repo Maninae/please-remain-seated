@@ -43,6 +43,7 @@ export function mountRankingsTab({ store }) {
     currentCellData: null,
     currentCellRef: null,          // cell ref that actually rendered (may be a fallback)
     lastRenderKey: '',
+    lastPopulatedMode: null,       // N6-n12: filter the preset select by the current mode
   };
 
   buildScaffold(panel);
@@ -76,7 +77,12 @@ export function mountRankingsTab({ store }) {
     state.preview = result.preview;
     state.loaded = true;
     setStatus(panel, '');
-    populatePresetSelect(state.indexObject);
+    // Populate the preset select for the CURRENT mode so a mode toggle never lists a
+    // preset that mode cannot answer. rerender() re-populates this whenever the mode
+    // changes.
+    const initialMode = panel.dataset.rankingsMode || store.state().mode || 'deplane';
+    populatePresetSelect(state.indexObject, initialMode);
+    state.lastPopulatedMode = initialMode;
     // Announce the load so the About tab (and anyone else) picks up the generation date
     // and the honest tier summary computed from the index cells themselves.
     window.dispatchEvent(new CustomEvent('prs:rankings-index-loaded', {
@@ -94,48 +100,55 @@ export function mountRankingsTab({ store }) {
   async function rerender() {
     if (!state.loaded) return;
     const request = buildRequestFromStore(state.indexObject, store.state(), panel);
+    // Keep the preset menu in sync with the mode so a menu never lists a preset the mode
+    // cannot answer (N6-n12). Only re-populate when the mode changes; when only the preset
+    // changes, populating would jitter the select's selected option.
+    if (state.lastPopulatedMode !== request.mode) {
+      populatePresetSelect(state.indexObject, request.mode);
+      state.lastPopulatedMode = request.mode;
+    }
+    // N6-B1: run the fallback loader BEFORE the no-cell guard, so an absent primary cell
+    // (partial index) falls through to the preview cell the same way a 404 does. This
+    // matches how the file-missing path recovers today: the deplaning tiles used to
+    // survive under a lit Boarding toggle because the guard fired before the loader ever
+    // ran, so the mode toggle's own render never happened and the old cell's numbers stayed
+    // on screen.
     const cellRef = selectCellForRequest(state.indexObject, request);
-    if (!cellRef) {
+    const loaded = await loadCellWithFallback({
+      indexObject: state.indexObject,
+      mode: request.mode,
+      preset: request.preset,
+      knobs: request.knobs,
+      primary: cellRef ? cellRef.cell : null,
+    });
+    if (!loaded) {
+      state.currentCellData = null;
+      state.currentCellRef = null;
+      state.lastRenderKey = '';
       renderNoCell(panel, request);
       return;
     }
-    // Cache guard: identical (cell.id + top-controls) skips a re-render.
-    const key = `${cellRef.cell.id}::${request.exact ? 'exact' : 'fallback'}`;
+    // From here on we have a cell in hand: either the primary or a fallback. When a
+    // fallback fires (or the primary was absent from the index), the loaded metadata
+    // replaces the selected one so the "no run at X, showing Y" knob note reflects what
+    // actually landed.
+    const effectiveRef = loaded.wasFallback || !cellRef
+      ? { cell: loaded.cellMeta, exactMatch: false }
+      : cellRef;
+    // Cache guard: identical (loaded cell id + top-controls) skips a re-render.
+    const key = `${effectiveRef.cell.id}::${request.exact ? 'exact' : 'fallback'}`;
     if (key === state.lastRenderKey && state.currentCellData) {
       // Still re-render controls (labels, nearest-run text may have changed).
       updateLedeForCell(panel, state.currentCellData);
-      renderTop(panel, request, state.currentCellRef || cellRef);
+      renderTop(panel, request, state.currentCellRef || effectiveRef);
       renderHeroFinding(panel, state.currentCellData, request.mode);
-      renderChart(panel, state.currentCellData, request, state.currentCellRef || cellRef);
+      renderChart(panel, state.currentCellData, request, state.currentCellRef || effectiveRef);
       renderChartCaveat(panel, state.currentCellData, request.mode);
       renderStats(panel, state.currentCellData, request.mode);
       await renderSensitivity(panel, state.currentCellData, request);
       return;
     }
     state.lastRenderKey = key;
-    setStatus(panel, 'Loading cell...');
-    // loadCellWithFallback never rejects: it tries the primary file, the preview index's
-    // equivalent, and the headline cell for (mode, preset) in that order, then resolves null.
-    // A partial precompute run therefore never leaves the page with an uncaught rejection.
-    const loaded = await loadCellWithFallback({
-      indexObject: state.indexObject,
-      mode: request.mode,
-      preset: request.preset,
-      knobs: request.knobs,
-      primary: cellRef.cell,
-    });
-    if (!loaded) {
-      state.currentCellData = null;
-      state.currentCellRef = null;
-      renderNoCell(panel, request);
-      return;
-    }
-    // When a fallback fires, the loaded cell metadata replaces the selected one so the "no run
-    // at X, showing Y" knob note reflects what actually landed. selectCellForRequest already
-    // toggles exactMatch, keep that untouched for anything downstream that reads it.
-    const effectiveRef = loaded.wasFallback
-      ? { cell: loaded.cellMeta, exactMatch: false }
-      : cellRef;
     state.currentCellData = loaded.cellData;
     state.currentCellRef = effectiveRef;
     setStatus(panel, '');
@@ -218,8 +231,11 @@ export function mountRankingsTab({ store }) {
         high: { cell: high, ...highData },
       };
     }
-    return result;
+    // Touch the parameter so a stale-import linter does not flag it. headlineCellData is
+    // reserved for a planned enhancement that plots the default value in the middle of
+    // each panel; keeping the signature stable avoids churn when that lands.
     void headlineCellData;
+    return result;
   }
 
   async function loadCellOrNull(filename) {
@@ -285,8 +301,36 @@ function renderEmptyState(panel) {
 }
 
 function renderNoCell(panel, request) {
+  // N6-B1: on the no-cell path, clear or rerender every part of the tab we cannot vouch
+  // for. Previously we cleared only the chart, so the hero sentence, stat tiles,
+  // comparison rows, sub-line and footnote from the PREVIOUS mode all survived and the
+  // page's 30 px hero misstated the tab under a freshly lit mode toggle.
   const chart = panel.querySelector('[data-rankings-chart]');
   if (chart) chart.innerHTML = '';
+  const hover = panel.querySelector('[data-rankings-hover]');
+  if (hover) hover.innerHTML = '';
+  const finding = panel.querySelector('[data-rankings-finding]');
+  if (finding) { finding.textContent = ''; finding.hidden = true; }
+  const stats = panel.querySelector('[data-rankings-stats]');
+  if (stats) stats.innerHTML = '';
+  const caveat = panel.querySelector('[data-rankings-chart-caveat]');
+  if (caveat) { caveat.textContent = ''; caveat.hidden = true; }
+  const footnote = panel.querySelector('[data-rankings-footnote]');
+  if (footnote) { footnote.textContent = ''; footnote.removeAttribute('data-cell-id'); }
+  const knobNotes = panel.querySelector('[data-rankings-knob-notes]');
+  if (knobNotes) knobNotes.innerHTML = '';
+  const sensitivity = panel.querySelector('[data-rankings-sensitivity]');
+  if (sensitivity) sensitivity.innerHTML = '';
+  // Sync the mode toggle's aria-checked and lit state to the request the user just made,
+  // so the toggle never says the OPPOSITE mode is active while the tab is blank.
+  const modeButtons = panel.querySelectorAll('[data-rankings-mode]');
+  for (const button of modeButtons) {
+    const match = button.dataset.rankingsMode === request.mode;
+    button.setAttribute('aria-checked', String(match));
+    button.classList.toggle('on', match);
+  }
+  const select = document.getElementById('rankings-preset-select');
+  if (select && select.value !== request.preset) select.value = request.preset;
   setStatus(panel, `No precomputed cell for ${request.mode} on ${request.preset}.`);
 }
 
@@ -313,18 +357,23 @@ function wireControls(panel, store, onChange) {
   }
 }
 
-function populatePresetSelect(indexObject) {
+function populatePresetSelect(indexObject, mode) {
   const select = document.getElementById('rankings-preset-select');
   if (!select) return;
   select.innerHTML = '';
-  const modes = new Set(indexObject.cells.map((c) => c.mode));
-  const availablePresets = new Set(indexObject.cells.map((c) => c.preset));
+  // N6-n12: filter cells by the CURRENT mode so the menu never lists a preset the current
+  // mode cannot answer. The old union across modes made a mode switch land on an empty
+  // cell state; filtering here means the preset select is always the menu of choices that
+  // will render.
+  const presetsForMode = mode
+    ? new Set(indexObject.cells.filter((c) => c.mode === mode).map((c) => c.preset))
+    : new Set(indexObject.cells.map((c) => c.preset));
   const singleClass = document.createElement('optgroup');
   singleClass.label = 'Single class';
   const multi = document.createElement('optgroup');
   multi.label = 'With first class';
   for (const preset of CABIN_PRESETS) {
-    if (!availablePresets.has(preset.id)) continue;
+    if (!presetsForMode.has(preset.id)) continue;
     const option = document.createElement('option');
     option.value = preset.id;
     option.textContent = preset.label;
@@ -333,12 +382,11 @@ function populatePresetSelect(indexObject) {
   }
   if (singleClass.children.length > 0) select.appendChild(singleClass);
   if (multi.children.length > 0) select.appendChild(multi);
-  // Pick the first available preset if the current selection is unavailable.
-  if (![...availablePresets].includes(select.value)) {
-    const fallback = availablePresets.has('a320') ? 'a320' : [...availablePresets][0];
+  // Pick the first available preset if the current selection is unavailable in this mode.
+  if (![...presetsForMode].includes(select.value)) {
+    const fallback = presetsForMode.has('a320') ? 'a320' : [...presetsForMode][0];
     if (fallback) select.value = fallback;
   }
-  void modes;
 }
 
 function isMultiClass(preset) {
@@ -587,14 +635,67 @@ function renderHeroFinding(panel, cellData, mode) {
  * The critic's N5-m10 asked for the range-of-validity note under the ranked chart, so a
  * reader looking at the off-scale front-to-back row sees the caveat. We only print it in
  * BOARD mode where the tail extrapolation actually applies.
+ *
+ * N6-M2: the caveat is COMPUTED from the loaded cell (front-to-back rate at this cabin,
+ * fastest airline, passenger count) instead of a hard-coded A320 sentence, so it never
+ * refutes the chart directly above it. The anchor clause is only added on presets that
+ * actually draw anchors.
  */
 function renderChartCaveat(panel, cellData, mode) {
   const host = panel.querySelector('[data-rankings-chart-caveat]');
   if (!host) return;
   if (mode !== 'board') { host.textContent = ''; host.hidden = true; return; }
-  host.textContent = 'The extremes of this ranking are extrapolation: front-to-back runs slower here than field data (about 3.8 pax/min in the sim, against 7 pax/min in the MythBusters back-to-front test), and every simulated airline procedure lands at or above the Spirit 20-minute anchor. The middle of the list is where the story lives.';
+  const sentence = composeChartCaveat(cellData);
+  if (!sentence) { host.textContent = ''; host.hidden = true; return; }
+  host.textContent = sentence;
   host.hidden = false;
-  void cellData;
+}
+
+/**
+ * Build the under-chart caveat sentence from the cell we are actually rendering.
+ *
+ * Inputs read straight off cellData:
+ *   - passengerCount (per cell)
+ *   - strategies[]  (medianSeconds, id, family, label)
+ *   - cell.preset   (so we know whether an anchor is drawn on this cabin)
+ *
+ * The sentence is honest by construction: rates and airline verdicts come from the cell.
+ * The anchor clause is added only when a Spirit-A320 or MythBusters anchor actually sits on
+ * the chart for this preset (see anchorsFor()).
+ */
+function composeChartCaveat(cellData) {
+  if (!cellData || !Array.isArray(cellData.strategies) || cellData.strategies.length === 0) return '';
+  const preset = cellData.cell?.preset || '';
+  const pax = Number.isFinite(cellData.passengerCount) ? cellData.passengerCount : null;
+  if (!pax) return '';
+  const b2f = cellData.strategies.find((s) => s.id === 'back-to-front');
+  const parts = [];
+  parts.push(`This ranking is a ${pax}-passenger cabin at these settings.`);
+  if (b2f && Number.isFinite(b2f.medianSeconds) && b2f.medianSeconds > 0) {
+    const b2fRate = pax / (b2f.medianSeconds / 60);
+    parts.push(`Front-to-back runs slower here than the MythBusters back-to-front field test: about ${b2fRate.toFixed(1)} pax/min in the sim, against ~7 pax/min measured on TV.`);
+  }
+  const airlineRows = cellData.strategies.filter((s) => s.family === 'airline');
+  if (airlineRows.length > 0) {
+    const sortedAirline = [...airlineRows].sort((a, b) => a.medianSeconds - b.medianSeconds);
+    const fastestAirline = sortedAirline[0];
+    const fastestAirlineMin = (fastestAirline.medianSeconds / 60).toFixed(1);
+    const anchorsHere = anchorsFor({ mode: 'board', preset, passengerCount: pax });
+    const spiritAnchor = anchorsHere.find((a) => a.id === 'spirit-a320');
+    if (spiritAnchor) {
+      const spiritMin = spiritAnchor.minutes;
+      const allAboveSpirit = sortedAirline.every((s) => s.medianSeconds >= spiritMin * 60);
+      if (allAboveSpirit) {
+        parts.push(`Every simulated airline procedure lands at or above the Spirit ${spiritMin}-minute anchor; the fastest, ${fastestAirline.label}, sits at ${fastestAirlineMin} min.`);
+      } else {
+        parts.push(`The fastest simulated airline procedure, ${fastestAirline.label}, lands at ${fastestAirlineMin} min, below the Spirit ${spiritMin}-minute anchor.`);
+      }
+    } else {
+      parts.push(`The fastest simulated airline procedure, ${fastestAirline.label}, lands at ${fastestAirlineMin} min. No airline field anchor sits on the chart for this cabin.`);
+    }
+  }
+  parts.push('The middle of the list is where the story lives.');
+  return parts.join(' ');
 }
 
 /**
@@ -617,21 +718,42 @@ function composeFinding(cellData, mode) {
     const airline = strategies.filter((s) => s.family === 'airline');
     const random = strategies.find((s) => s.id === 'random');
     if (airline.length >= 6 && random) {
+      // Honest negative case first: on some presets EVERY airline procedure is slower than
+      // random order (N6-B2 caught this on the 737-800 two-class and the A321neo
+      // three-class). The finding sentence used to hide that with a Math.max(0, ...) on
+      // the saved-time value; now it says so plainly.
+      const airlineSlowerThanRandom = airline.filter((s) => s.medianSeconds > random.medianSeconds);
+      if (airlineSlowerThanRandom.length === airline.length) {
+        const airlineMedianSeconds = airline.reduce((sum, s) => sum + s.medianSeconds, 0) / airline.length;
+        const gapSeconds = airlineMedianSeconds - random.medianSeconds;
+        const gapText = formatMinutesAndSeconds(gapSeconds);
+        return `Every one of ${airline.length} airline procedures boards ${aircraft} slower than random order (mean airline ${gapText} worse).`;
+      }
       const tiedAgainstRandom = airline.filter((s) => Math.abs(s.medianSeconds - random.medianSeconds) <= 60);
       const bestTextbook = strategies.find((s) => (s.family || 'textbook') !== 'airline' && s.id !== 'random');
       if (tiedAgainstRandom.length >= Math.max(6, airline.length - 3) && bestTextbook) {
-        const savedSeconds = Math.max(0, random.medianSeconds - bestTextbook.medianSeconds);
-        const savedMin = Math.floor(savedSeconds / 60);
-        const savedSec = Math.round(savedSeconds - savedMin * 60);
-        const savedText = savedMin > 0 ? `${savedMin}:${savedSec < 10 ? '0' : ''}${savedSec}` : `${Math.round(savedSeconds)} seconds`;
+        const savedSeconds = random.medianSeconds - bestTextbook.medianSeconds;
+        // The saved value can be negative if the "best textbook" is somehow slower than
+        // random; print the direction rather than clamp.
+        const savedAbs = Math.abs(savedSeconds);
+        const savedText = formatMinutesAndSeconds(savedAbs);
+        const direction = savedSeconds >= 0 ? 'saves about' : 'costs about';
         // The finding sentence uses "within a minute of random". The under-chart caption
         // names the largest sliding-window tie among airlines (a different rule). Both
         // numbers are honest; the caption spells the second rule out (N5-m3).
-        return `${tiedAgainstRandom.length} of ${airline.length} airline procedures board ${aircraft} within a minute of random order. ${bestTextbook.label} saves about ${savedText} against random.`;
+        return `${tiedAgainstRandom.length} of ${airline.length} airline procedures board ${aircraft} within a minute of random order. ${bestTextbook.label} ${direction} ${savedText} against random.`;
       }
     }
   }
   return `${fastest.label} ${verb} ${aircraft} in ${fastestMin} min; ${slowest.label} takes ${slowestMin} min.`;
+}
+
+function formatMinutesAndSeconds(seconds) {
+  const total = Math.round(Math.abs(seconds));
+  const minutes = Math.floor(total / 60);
+  const secs = total - minutes * 60;
+  if (minutes > 0) return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+  return `${secs} seconds`;
 }
 
 function wireHoverPanel(svgEl, hoverHost, cellData, hitTargets) {

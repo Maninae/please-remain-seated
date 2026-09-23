@@ -27,12 +27,14 @@
  * (60 s door-open delay, 2 s door-service time) the free-for-all deplane over 40 seeds yields a
  * total median of ~6.4 min FROM DOOR OPEN, first-two-minute door throughput ~19 pax/min, and
  * whole-run door throughput passengerCount / totalMinutes ~23 pax/min. The whole-run figure is
- * what Schultz 2018 (median 23 pax/min, Q1 18 Q3 29) and Milne & Salari (15-17 pax/min for A320
- * 8.5-9.6 min deplanings) actually measure. The 8-min total floor from Schultz's "91% within
- * 8 min" mixes tail-of-distribution with a median claim and is not a defensible ceiling on a
- * median. The test asserts whole-run throughput in [14, 24] pax/min (Milne & Salari low end to
- * Schultz median), first-two-minute in [15, 30], total minutes (from door open) as a sanity
- * bound in [5, 13], and the compliance-1.0 ordering aisle-first < free-for-all.
+ * what Schultz 2018 (median 23 pax/min, Q1 18 Q3 29) and Wald, Harmon & Klabjan 2014 (JATM
+ * 36:101-109, 15-17 pax/min average deplaning rate on a full A320; 8.5-9.6 min follows by
+ * arithmetic at 144 seats) actually measure. The 8-min total floor from Schultz's "91%
+ * within 8 min" mixes tail-of-distribution with a median claim and is not a defensible
+ * ceiling on a median. The live test asserts whole-run throughput in [14, 27] pax/min
+ * (Wald, Harmon & Klabjan low end at 15 to comfortably above Schultz median 23; Schultz Q3
+ * is 29), first-two-minute in [15, 30], total minutes (from door open) as a sanity bound in
+ * [5, 13], and the compliance-1.0 ordering aisle-first < free-for-all.
  */
 
 export const CABIN_DEFAULTS = Object.freeze({
@@ -62,10 +64,11 @@ export const PASSENGER_DEFAULTS = Object.freeze({
   // but everything else (prep timers, standing, contested cells, retrieval, walking toward the
   // door) proceeds. Reported summary().totalSeconds is measured from door open, matching Schultz
   // 2018's 23 pax/min "first minute" figure (which is the first minute of door OUTFLOW, not the
-  // first minute after seatbelt-sign off). Ops assumption. 45 s sits inside the one-to-three
-  // minute field range and lets a small share of prep and standing spill over into the first
-  // moments after door open, which keeps the whole-run throughput close to Schultz's median
-  // (~23 pax/min) rather than pinning it against the 30 pax/min door-service ceiling.
+  // first minute after seatbelt-sign off). Ops assumption. 45 s is below the low end of the
+  // one-to-three minute field range and lets a small share of prep and standing spill over
+  // into the first moments after door open, which keeps the whole-run throughput close to
+  // Schultz's median (~23 pax/min) rather than pinning it against the 30 pax/min door-service
+  // ceiling.
   doorOpenDelaySeconds: 45,
 
   // Bags that go in the overhead bin (personal items under the seat never block the aisle).
@@ -75,10 +78,11 @@ export const PASSENGER_DEFAULTS = Object.freeze({
   walkSpeedMetersPerSecond: 0.8,
   walkSpeedLogSigma: 0.2,
 
-  // Seatbelt-sign-off to ready-to-stand. Milne & Salari use 1-2 s; we widen to a lognormal with
-  // median 3 s and sigma 1.0, which spreads the prep-timer tail so not everyone stands within
-  // the first few seconds after seatbelt-sign off. Assumption; the calibration gates keep the
-  // whole-run and first-two-minute throughputs inside the field-measured ranges.
+  // Seatbelt-sign-off to ready-to-stand. Deplaning folklore uses 1-2 s (unverified against a
+  // primary source); we widen to a lognormal with median 3 s and sigma 1.0, which spreads the
+  // prep-timer tail so not everyone stands within the first few seconds after seatbelt-sign
+  // off. Assumption; the calibration gates keep the whole-run and first-two-minute
+  // throughputs inside the field-measured ranges.
   prepMedianSeconds: 3,
   prepLogSigma: 1.0,
   distractedFraction: 0.10,
@@ -89,8 +93,9 @@ export const PASSENGER_DEFAULTS = Object.freeze({
   // row-pair is empty. In other words they wait for the queue to start moving rather than
   // standing into a packed aisle. Impatient passengers become READY as soon as their prep
   // timer expires (the round-2 behaviour). 0.4 is our assumption; the deplane calibration test
-  // keeps the whole-run and first-two-minute throughputs inside the Milne & Salari / Schultz
-  // ranges. If those gates fail we back this off toward 0.25 before touching anything else.
+  // keeps the whole-run and first-two-minute throughputs inside the Wald, Harmon & Klabjan
+  // 2014 / Schultz 2018 ranges. If those gates fail we back this off toward 0.25 before
+  // touching anything else.
   patientFraction: 0.4,
 
   // Bin retrieval while deplaning: Schultz stow Weibull(1.7, 16 s) scaled by the measured
@@ -120,7 +125,7 @@ export const PASSENGER_DEFAULTS = Object.freeze({
   counterflowExtraSecondsPerRow: 4,
 
   // Behavior traits, drawn once per passenger.
-  politeness: 0.9,      // P(a walker lets a row-mate step into the empty cell ahead): Milne & Salari
+  politeness: 0.9,      // P(a walker lets a row-mate step into the empty cell ahead): assumption; not verified against a primary source
   compliance: 0.85,     // P(passenger obeys the announced order): Schultz conformance
   groupFraction: 0.25,  // fraction of passengers travelling in a group that sits together and moves together (assumption)
   groupSizeRange: [2, 3],

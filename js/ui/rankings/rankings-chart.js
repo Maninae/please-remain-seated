@@ -56,7 +56,10 @@ const TITLE_LINE_HEIGHT_PX = 20;
 const ANCHOR_LABEL_FONT_PX = 10;
 const PHONE_WIDTH_THRESHOLD = 640;
 const TIE_HIGHLIGHT_ALPHA = 0.08;
-const OUTLIER_MULT = 1.25;   // rows past OUTLIER_MULT * axisMax draw as broken bars.
+// N6-M4: any row whose median sits past the axis cap gets the broken-bar treatment. The
+// old rule required median > 1.25 * axisMax before firing, so rows in the 25% dead band
+// silently drew at the axis edge (an E175 row at 18:20 landed on the 15m tick). The break
+// mark now fires the moment the axis truncates the row.
 const CAPTION_FONT_PX = 11;
 
 /**
@@ -84,9 +87,26 @@ export function renderRankingsChart(host, {
   // Two-pass title: wrap first so the title height feeds the top padding.
   const titleLines = wrapTitleForWidth(findingSentence, width);
   const titleHeight = titleLines.length * TITLE_LINE_HEIGHT_PX;
-  const anchorRows = Math.min(3, Math.max(0, anchors.length));
-  const anchorBand = anchorRows > 0 ? anchorRows * 12 + 10 : 8;
-  const paddingTop = 12 + titleHeight + 14 + anchorBand + 12;
+  // N6-M3: derive the anchor band from ROW_OFFSETS so the top row label always clears the
+  // viewBox, regardless of whether the finding sentence is drawn inside the SVG (round-05
+  // moved it out of the SVG which zeroed titleHeight, and the old formula relied on that
+  // padding to clear the row-2 label). On phone we stagger horizontally on one row instead
+  // of using three rows, so labels never render above y=0.
+  //
+  // Layout ordering (small y to large y): title -> gap -> anchor labels stacked -> axis
+  // line -> chart body. anchorTopHeadroom is the height above axisY the top row label
+  // needs (max ROW_OFFSETS + ascent + a small margin), so axisY = topOfAnchorRegion +
+  // anchorTopHeadroom keeps every label bbox inside the SVG viewBox.
+  const anchorRowOffsets = anchorRowOffsetsForWidth(width);
+  const anchorRows = Math.min(anchorRowOffsets.length, Math.max(0, anchors.length));
+  const anchorAscentPx = ANCHOR_LABEL_FONT_PX;   // ~font-size covers ascent + a hair
+  const anchorTopHeadroom = anchorRows > 0
+    ? Math.max(...anchorRowOffsets.slice(0, anchorRows)) + anchorAscentPx + 4
+    : 8;
+  // Below-axis gap: 24 px so the "axis starts at Xm" floor note (drawn at axisY + 14) does
+  // not collide with the first row's label.
+  const axisBelowGap = 24;
+  const paddingTop = 12 + titleHeight + 14 + anchorTopHeadroom + axisBelowGap;
 
   // Axis range: start near the data floor and cap in the middle of the distribution.
   // Floor: p10 of the fastest row, rounded DOWN to a nice minute value. Boarding times have
@@ -98,7 +118,8 @@ export function renderRankingsChart(host, {
   const axisMax = computeAxisCap(bandRows, anchors);
   const paddedMax = niceCeiling(axisMax);
   const paddedMin = computeAxisFloor(bandRows, anchors, paddedMax);
-  const outlierThreshold = paddedMax * OUTLIER_MULT;
+  // Any median past paddedMax draws with a break mark; see the comment on OUTLIER_MULT.
+  const outlierThreshold = paddedMax;
 
   // Bottom caption for the tie band, so we reserve height for it if it renders. Wrap width
   // uses the CHART's inner width so a short phone column does not overrun the plot padding.
@@ -117,11 +138,17 @@ export function renderRankingsChart(host, {
   const chartWidth = Math.max(1, chartX1 - chartX0);
 
   drawTitle(svg, titleLines, width);
-  const axisY = paddingTop - anchorBand - 2;
+  // axisY sits axisBelowGap px above paddingTop (leaving room for the "axis starts at"
+  // note when the axis is truncated), with all room above it reserved for the title +
+  // anchor labels. Every label baseline sits at axisY - ROW_OFFSETS[i], and the top of
+  // the tallest label (baseline - ascent) lands at y >= 12 + titleHeight + 14 + 4,
+  // i.e. inside the SVG viewBox by construction.
+  const axisY = paddingTop - axisBelowGap;
   drawAxis(svg, chartX0, chartX1, axisY, paddedMin, paddedMax);
   const plotBottom = paddingTop + totalRows * ROW_HEIGHT + groupGaps + 4;
   drawAnchors(svg, {
     anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick,
+    rowOffsets: anchorRowOffsets,
   });
 
   const hitTargets = [];
@@ -267,9 +294,11 @@ function computeAxisFloor(rows, anchors, paddedMax) {
     return s > 0 && s < min ? s : min;
   }, Number.POSITIVE_INFINITY);
   const candidate = Math.min(minP10, Number.isFinite(anchorMin) ? anchorMin : minP10);
-  // Only apply a floor when the data really do sit far from zero: at least 4 minutes above 0
-  // AND at least 25% of the axis cap.
-  if (candidate < 4 * 60) return 0;
+  // Only apply a floor when the data really do sit far from zero: at least 2 minutes above
+  // 0 AND at least 25% of the axis cap. N6-m2 caught the old 4-minute cutoff eating a third
+  // of the A320 deplane frame; 2 minutes still keeps the CRJ deplane (3-min floor) starting
+  // near zero while the A320 deplane (3.5-min p10) earns a floor.
+  if (candidate < 2 * 60) return 0;
   if (candidate < paddedMax * 0.25) return 0;
   // Leave a small breather below the data so the leftmost dot doesn't kiss the axis label.
   const breather = Math.max(30, (paddedMax - candidate) * 0.05);
@@ -350,10 +379,24 @@ function computeTieCaption(groups) {
   const tieLast = sorted[tie.startIndex + tie.count - 1];
   const spanSeconds = Math.max(0, tieLast.medianSeconds - tieFirst.medianSeconds);
   const noun = airlineGroup ? 'airline procedures' : 'strategies';
-  // N5-m3: the finding sentence counts airlines within a minute of RANDOM; this caption
-  // counts the largest sliding window of airlines within a minute of EACH OTHER. Two
-  // different sets, so we name both rules to avoid the "why 11 vs 10" ambiguity.
-  return `The ${tie.count} shaded ${noun} land within a minute of one another (${Math.round(spanSeconds)}-second spread); the finding above counts a different set: airlines within a minute of random.`;
+  const baseSentence = `The ${tie.count} shaded ${noun} land within a minute of one another (${Math.round(spanSeconds)}-second spread).`;
+  // N5-m3 / N6-m3: the second clause is appended only when we can verify the finding above
+  // is the "airlines within a minute of random" one (same rule composeFinding uses in
+  // index.js). Deplane cells have no airline family; board presets whose airline tie is
+  // thin fall through to fastest-vs-slowest and the second clause would name a rule the
+  // finding does not use. Check the same condition here so the two sentences agree.
+  if (!airlineGroup) return baseSentence;
+  const airlineRows = airlineGroup.rows.filter((r) => r.family === 'airline');
+  // Reach into all rows via groups (random lives outside the airline group).
+  let random = null;
+  for (const g of groups) {
+    const found = g.rows.find((r) => r.id === 'random');
+    if (found) { random = found; break; }
+  }
+  if (!random || airlineRows.length < 6) return baseSentence;
+  const tiedAgainstRandom = airlineRows.filter((s) => Math.abs(s.medianSeconds - random.medianSeconds) <= 60);
+  if (tiedAgainstRandom.length < Math.max(6, airlineRows.length - 3)) return baseSentence;
+  return `${baseSentence.slice(0, -1)}; the finding above counts a different set: airlines within a minute of random.`;
 }
 
 /**
@@ -463,10 +506,25 @@ function drawAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
   }
 }
 
-function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick }) {
+/**
+ * Row offsets (px above axisY) available for stacking anchor labels.
+ *
+ * Desktop uses three rows so KLM, Spirit and MythBusters stack cleanly without cutting into
+ * the chart body. Phone drops to one row because a 400 px viewport cannot afford the height
+ * that three rows would push into the anchor band; labels stagger horizontally instead
+ * (drawAnchors relies on LABEL_MIN_GAP to skip a label whose x is too close to a neighbour).
+ * The band-height math in the caller derives the top padding from max(rowOffsets) plus the
+ * font's ascent, so returning fewer rows here shrinks the reserved band automatically.
+ */
+function anchorRowOffsetsForWidth(width) {
+  if (width < PHONE_WIDTH_THRESHOLD) return [22];
+  return [22, 34, 46];
+}
+
+function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick, rowOffsets }) {
   if (!anchors || anchors.length === 0) return;
   const LABEL_MIN_GAP = 82;
-  const ROW_OFFSETS = [22, 34, 46];
+  const ROW_OFFSETS = Array.isArray(rowOffsets) && rowOffsets.length > 0 ? rowOffsets : [22, 34, 46];
   const chartInner = chartX1 - chartX0;
   const range = Math.max(1, paddedMax - paddedMin);
   const projectSeconds = (s) => chartX0 + Math.min(1, Math.max(0, (s - paddedMin) / range)) * chartInner;
@@ -486,7 +544,26 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axi
     .filter(Boolean)
     .sort((a, b) => a.x - b.x);
   const lastXPerRow = ROW_OFFSETS.map(() => -Infinity);
+  // Phone widths use a single row: skip a label whose x is inside LABEL_MIN_GAP / 2 of the
+  // previous one so we do not stack two labels on top of each other. Desktop uses three
+  // rows, where the row-stacking loop below already handles collisions.
+  const singleRow = ROW_OFFSETS.length === 1;
+  const phoneMinGap = LABEL_MIN_GAP * 0.7;
   for (const { anchor, x, xStart, xEnd, isRange } of anchorPoints) {
+    if (singleRow && x - lastXPerRow[0] < phoneMinGap) {
+      // Draw the tick line so the reader still sees the anchor position, but skip the
+      // label to avoid overlap. The anchor's popover row on the info panel is unaffected.
+      appendLine(svg, {
+        x1: x, x2: x,
+        y1: axisY,
+        y2: plotBottom,
+        stroke: THEME.ink,
+        'stroke-width': 1.0,
+        'stroke-dasharray': '2 3',
+        'stroke-opacity': 0.45,
+      });
+      continue;
+    }
     if (isRange && xEnd - xStart > 2) {
       // Draw the range as a soft shaded band spanning the two endpoints, with a single
       // horizontal top rule so the reader sees one measurement, not two (N5-m2).
