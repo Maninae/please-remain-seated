@@ -44,7 +44,7 @@ import { DeplanePhase, SimMode, Vis, EMPTY_CELL } from './types.js';
 import { accountStep, createMetrics, sampleMetrics, summarizeMetrics } from './metrics.js';
 import { claimCell, createDoorServers, isCellEmpty } from './aisle.js';
 import {
-  indexRowMates, computeGroupPermits, arbitrateContests, bagAccessCells,
+  indexRowMates, computeGroupPermits, arbitrateContests, bagAccessCells, rowCellPair,
 } from './deplane-rules.js';
 import { processWalkers } from './deplane-walk.js';
 import { DEPLANE_STRATEGY_BY_ID } from './strategies/deplane.js';
@@ -135,12 +135,23 @@ function initPassengers(passengers, cabin) {
     passenger.walkPurpose = null;
     passenger.doorCell = nearestDoorCell(cabin, passenger.row);
     passenger.pendingCounterflowSeconds = 0;
+    // `bagCount` stays the sampled physical total for the whole run (the UI reads it as
+    // "bags carried"); track progress through the bag list with `bagsRemaining`. For deplane the
+    // starting value is the physical bag count aboard, which is bagBins.length after
+    // assignBagsToBins has gate-checked any bag that could not fit.
+    passenger.bagsRemaining = Array.isArray(passenger.bagBins) ? passenger.bagBins.length : passenger.bagCount;
   }
 }
 
 /**
  * Prep timers for SEATED passengers. Bucket seatedWait for anyone still in the seat this step;
  * READY passengers accrue seatedWait after their stand attempt (accountReadyStanders).
+ *
+ * Patient passengers (see PASSENGER_DEFAULTS.patientFraction) hold in SEATED even after their
+ * prep timer expires until BOTH the aircraft door has opened AND at least one aisle cell of
+ * their row-pair is empty. In plain terms they wait for the queue to start moving instead of
+ * standing straight into a packed aisle. Impatient passengers become READY the moment prep is
+ * done, so the opening act is a staggered stand rather than an instantaneous mass ramp.
  */
 function stepPrepTimers(state, dt) {
   for (const passenger of state.passengers) {
@@ -148,11 +159,20 @@ function stepPrepTimers(state, dt) {
     passenger.timer = Math.max(0, passenger.timer - dt);
     accountStep(passenger, 'seatedWait', dt);
     passenger.vis = Vis.SEATED;
-    if (passenger.timer <= 0) {
+    if (passenger.timer <= 0 && readyEligible(passenger, state)) {
       passenger.phase = P.READY;
       passenger.vis = Vis.READY;
     }
   }
+}
+
+function readyEligible(passenger, state) {
+  if (!passenger.patient) return true;
+  if (state.t < state.doorOpenAtSeconds) return false;
+  const aisle = state.aisles[passenger.aisleIndex];
+  if (!aisle) return true;
+  const pair = rowCellPair(state.cabin, passenger.row);
+  return aisle[pair[0]] === EMPTY_CELL || aisle[pair[1]] === EMPTY_CELL;
 }
 
 /**
@@ -182,7 +202,11 @@ function stepActiveTimers(state, dt, cabin, counterflowExtraSecondsPerRow) {
 function finishRetrieval(passenger, cabin, counterflowExtraSecondsPerRow) {
   const binIdx = passenger.bagBins.shift();
   passenger.retrievalSeconds.shift();
-  passenger.bagCount = passenger.bagBins.length;
+  // `bagCount` is the sampled physical total and must not change during the run: the follow line
+  // reads it as "1 bag" / "2 bags" for the whole race. Progress lives in `bagsRemaining`.
+  if (typeof passenger.bagsRemaining === 'number' && passenger.bagsRemaining > 0) {
+    passenger.bagsRemaining -= 1;
+  }
   if (binIdx === undefined) return;
   const accessRow = binAccessRow(cabin, passenger.row, binIdx);
   const rowsAft = accessRow - passenger.row;
@@ -203,7 +227,7 @@ function finishRetrieval(passenger, cabin, counterflowExtraSecondsPerRow) {
 function routeInAisle(state, cabin) {
   for (const passenger of state.passengers) {
     if (passenger.phase !== P.IN_AISLE) continue;
-    if (passenger.bagCount > 0 && passenger.bagBins.length > 0) {
+    if (passenger.bagBins && passenger.bagBins.length > 0) {
       const pair = bagAccessCells(cabin, passenger, passenger.bagBins[0]);
       if (pair.includes(passenger.aisleCell)) {
         // Already in the bin's access-row pair; retrieve without walking.

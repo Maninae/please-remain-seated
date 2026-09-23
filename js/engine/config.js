@@ -75,11 +75,23 @@ export const PASSENGER_DEFAULTS = Object.freeze({
   walkSpeedMetersPerSecond: 0.8,
   walkSpeedLogSigma: 0.2,
 
-  // Seatbelt-sign-off to ready-to-stand. Milne & Salari use 1-2 s; the distracted tail is our assumption.
-  prepMedianSeconds: 2,
-  prepLogSigma: 0.8,
+  // Seatbelt-sign-off to ready-to-stand. Milne & Salari use 1-2 s; we widen to a lognormal with
+  // median 3 s and sigma 1.0, which spreads the prep-timer tail so not everyone stands within
+  // the first few seconds after seatbelt-sign off. Assumption; the calibration gates keep the
+  // whole-run and first-two-minute throughputs inside the field-measured ranges.
+  prepMedianSeconds: 3,
+  prepLogSigma: 1.0,
   distractedFraction: 0.10,
   distractedExtraSecondsRange: [10, 30],
+
+  // Behavior assumption: a share of passengers are "patient". They do not become READY (ready
+  // to stand) until BOTH the aircraft door has opened AND at least one aisle cell of their
+  // row-pair is empty. In other words they wait for the queue to start moving rather than
+  // standing into a packed aisle. Impatient passengers become READY as soon as their prep
+  // timer expires (the round-2 behaviour). 0.4 is our assumption; the deplane calibration test
+  // keeps the whole-run and first-two-minute throughputs inside the Milne & Salari / Schultz
+  // ranges. If those gates fail we back this off toward 0.25 before touching anything else.
+  patientFraction: 0.4,
 
   // Bin retrieval while deplaning: Schultz stow Weibull(1.7, 16 s) scaled by the measured
   // deplane/board outflow ratio. Second bag costs 60% more on top.

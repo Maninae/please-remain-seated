@@ -92,4 +92,23 @@ describe('boarding ordering (compliance 1.0, no groups, 20 seeds)', () => {
     assert.ok(steffen < wilma, `steffen ${steffen.toFixed(0)}s should be under wilma ${wilma.toFixed(0)}s`);
     assert.ok(wilma < random, `wilma ${wilma.toFixed(0)}s should be under random ${random.toFixed(0)}s`);
   });
+
+  it('strict-settings ordering: steffen and reverse-pyramid < wilma < random', () => {
+    // Steffen 2008's optimality argument assumes 2-row spacing is REQUIRED for parallel stow,
+    // but our sim uses a row-pair aisle where 1-row-apart stowers already stow in parallel; that
+    // rewards reverse pyramid's denser packing, so in this sim the two "front-of-the-pack"
+    // strategies (steffen and reverse-pyramid) cluster together with reverse pyramid usually
+    // ahead by 30-90 s at the strict settings. We assert both cluster below wilma below random
+    // rather than pin a specific order between the two.
+    const steffen = medianSeconds(seeds, 'steffen', strict);
+    const reversePyramid = medianSeconds(seeds, 'reverse-pyramid', strict);
+    const wilma = medianSeconds(seeds, 'wilma', strict);
+    const random = medianSeconds(seeds, 'random', strict);
+    assert.ok(reversePyramid < wilma,
+      `reverse-pyramid ${reversePyramid.toFixed(0)}s should be under wilma ${wilma.toFixed(0)}s`);
+    assert.ok(steffen < wilma,
+      `steffen ${steffen.toFixed(0)}s should be under wilma ${wilma.toFixed(0)}s`);
+    assert.ok(wilma < random,
+      `wilma ${wilma.toFixed(0)}s should be under random ${random.toFixed(0)}s`);
+  });
 });

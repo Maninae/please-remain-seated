@@ -72,6 +72,13 @@ Walking speed, bag stow and retrieval time, seat-interference movement counts, a
 
 Every strategy's total time is checked against these bounds by the calibration tests, `tests/unit/calibration-deplane.test.js` and `tests/unit/calibration-board.test.js`, median over 40 seeds each.
 
+The whole-run deplaning gate derives from the two sources above, not from a widened tolerance:
+
+- The A320 default carries 153 passengers (180 seats at 0.85 load factor).
+- Schultz 2018 measured a median door outflow of 23 pax/min (Q1 18, Q3 29) in the first minute of outflow.
+- Milne and Salari 2016 report A320 deplanings of 8.5 to 9.6 minutes at 15 to 17 pax/min whole-run door rate.
+- So the whole-run gate spans 14 to 24 pax/min (Milne and Salari low end to Schultz median) and the total-minutes sanity bound spans 5 to 13 minutes, measured from door open, over medians of 40 seeds.
+
 ## Run it locally
 
 ```sh

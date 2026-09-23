@@ -114,25 +114,41 @@ const wilmaStrategy = {
 const steffenStrategy = {
   id: 'steffen',
   label: 'Steffen optimal',
-  blurb: 'Windows first, then middles, then aisles; inside each type alternate sides and rows so nobody is next to their neighbour.',
+  blurb: 'Windows first, alternating rows so consecutive boarders are two rows apart, both sides of each row together, then middles, then aisles (Steffen 2008). Fastest boarding method at full compliance and no groups; reverse pyramid can beat it once family groups and non-compliance enter, which is the literature’s known fragility.',
   order(passengers, rng, cabin) {
     const maxByBlockSide = computeMaxDepthByBlockSide(passengers);
     const aisleCount = cabin?.aisleCount ?? countAisles(passengers);
+    const rows = cabin?.rows ?? maxRow(passengers);
+    // Steffen 2008: within a type, consecutive boarders are TWO rows apart so they can stow in
+    // parallel. Order the queue as:
+    //   for each type (window -> middle -> aisle):
+    //     for each aisle in the cabin:
+    //       parity 0 rows back-to-front (both sides of each row consecutively), then parity 1
+    //       rows back-to-front (both sides of each row consecutively).
+    // Consecutive queue entries alternate between (same row, opposite side) and (row - 2, other
+    // side back to side 1). The back-most row is served first, so the back of the cabin fills
+    // as arrivals enter, keeping the front clear until the second half of the type-wave. Reverse
+    // pyramid boards adjacent rows back-to-front, which packs more simultaneous stowers into the
+    // same time slice in our sim; at defaults it still often wins, and the blurb owns that
+    // fragility instead of pretending Steffen dominates every dial.
+    const backMostParity = rows % 2;   // parity of the back-most row
+    const otherParity = 1 - backMostParity;
     const result = [];
     for (const type of ['window', 'middle', 'aisle']) {
       for (let aisleIndex = 0; aisleIndex < aisleCount; aisleIndex += 1) {
-        // Alternate parity (odd rows first) and side (0 then 1) inside every aisle: this is the
-        // 2-row / 1-seat spacing that makes Steffen collision-free.
-        for (const parity of [1, 0]) {
-          for (const side of [0, 1]) {
-            const bucket = passengers.filter((passenger) =>
-              seatType(passenger, maxByBlockSide) === type
-              && passenger.aisleIndex === aisleIndex
-              && passenger.side === side
-              && (passenger.row % 2) === parity,
-            );
-            bucket.sort((a, b) => b.row - a.row);  // back to front
-            for (const passenger of bucket) result.push(passenger);
+        for (const parity of [backMostParity, otherParity]) {
+          const rowsInWave = [];
+          for (let row = rows; row >= 1; row -= 1) if ((row % 2) === parity) rowsInWave.push(row);
+          for (const row of rowsInWave) {
+            for (const side of [0, 1]) {
+              for (const passenger of passengers) {
+                if (passenger.row !== row) continue;
+                if (passenger.aisleIndex !== aisleIndex) continue;
+                if (passenger.side !== side) continue;
+                if (seatType(passenger, maxByBlockSide) !== type) continue;
+                result.push(passenger);
+              }
+            }
           }
         }
       }

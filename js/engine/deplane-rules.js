@@ -32,6 +32,22 @@ import { isCellEmpty } from './aisle.js';
 
 const P = DeplanePhase;
 
+// -------------------- tie-break --------------------
+
+/**
+ * Order two passengers by their per-passenger `priority` draw, falling back to id when the draw
+ * is not set (a hand-built test passenger). Priority is uniform [0, 1) and is made once per
+ * passenger from the population rng, so the ordering is deterministic per seed and shared by
+ * both race lanes. This is what stops a left-versus-right imbalance from creeping into every
+ * contest just because ids run in seat-column order.
+ */
+export function priorityCompare(a, b) {
+  const pa = typeof a.priority === 'number' ? a.priority : Number.POSITIVE_INFINITY;
+  const pb = typeof b.priority === 'number' ? b.priority : Number.POSITIVE_INFINITY;
+  if (pa !== pb) return pa - pb;
+  return a.id - b.id;
+}
+
 // -------------------- row-mates --------------------
 
 export function indexRowMates(passengers) {
@@ -107,7 +123,10 @@ export function strategyPermits(passenger, strategy, state, groupPermits) {
  * For each stander, try the forward cell of their row's pair first; if that cell is taken (or
  * lost to a non-yielding walker), try the aft cell. If both cells fail, the passenger waits.
  * Aisle-seat neighbours from the two sides of a row now naturally share the pair: one may claim
- * forward and the other aft. Ties within a single cell are still resolved by ascending id.
+ * forward and the other aft. Ties within a single cell are resolved by the per-passenger
+ * `priority` draw (uniform, made once from the population rng); a straight id fallback would put
+ * left-column passengers permanently ahead of right-column passengers since ids run in
+ * seat-column order, and the left half of the cabin would then finish ahead systematically.
  */
 export function arbitrateContests(state, strategy, groupPermits, rowMatesIndex, dtEps) {
   const standers = [];
@@ -117,7 +136,7 @@ export function arbitrateContests(state, strategy, groupPermits, rowMatesIndex, 
   for (const passenger of state.passengers) {
     if (passenger.phase === P.READY) sortedReady.push(passenger);
   }
-  sortedReady.sort((a, b) => a.id - b.id);
+  sortedReady.sort(priorityCompare);
   for (const passenger of sortedReady) {
     const rowMates = rowMatesIndex.get(rowSideKeyFor(passenger)) || [];
     if (!rowMatesCleared(passenger, rowMates)) continue;

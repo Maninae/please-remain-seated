@@ -28,13 +28,25 @@
  *     aisleIndex (0-based, which aisle this passenger uses to enter or exit),
  *     side (0 aisle-to-my-right, 1 aisle-to-my-left),
  *     seatDepth (0 aisle seat, 1 next in, 2 window in a 3-wide, etc.),
- *     bagCount,
+ *     bagCount,                (sampled physical total; STAYS CONSTANT for the whole run so the
+ *                               UI can read it as "bags carried" without seeing it drop to 0
+ *                               at exit. Progress lives in bagsRemaining.),
+ *     bagsRemaining,           (bags left to handle: to retrieve on deplane, to stow on board.
+ *                               Starts at bagCount at sim init, decrements on every bag event
+ *                               including gate-checks on boarding.),
  *     bagBins: number[]        (global bin index per bag, filled by bins.js placement),
  *     walkSecondsPerCell,
  *     prepSeconds,
  *     retrievalSeconds: number[]  (per bag),
  *     stowSeconds: number[]       (per bag),
  *     yields: boolean, compliant: boolean, groupId: number | null, doorGapSeconds,
+ *     priority: number,        (uniform [0, 1) draw, made once from the population rng; used
+ *                               for every tie-break so the ordering does not fall back to
+ *                               passenger id (which runs in seat-column order, biasing the
+ *                               left half of the cabin).),
+ *     patient: boolean,        (patient passengers stay SEATED after prep expires until the
+ *                               door has opened AND at least one aisle cell of their row-pair
+ *                               is empty. See PASSENGER_DEFAULTS.patientFraction.),
  *     phase: DeplanePhase | BoardPhase,
  *     vis: Vis,
  *     aisleCell: number | null,   (index into state.aisles[aisleIndex]),

@@ -67,6 +67,10 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
     passenger.directionBoard = 1;
     passenger.bagsStowedBoard = 0;
     passenger.displacedByBoard = null;
+    // `bagCount` stays the sampled physical total (the UI reads it as "bags carried"); progress
+    // through the bag list lives in `bagsRemaining`, decremented on every stow completion and on
+    // every gate-check.
+    passenger.bagsRemaining = passenger.bagCount;
   }
 
   const state = {
@@ -198,7 +202,7 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
    * the aft-bound arrivals.
    */
   function onArrival(passenger) {
-    if (passenger.bagsStowedBoard < passenger.bagCount) {
+    if (passenger.bagsRemaining > 0) {
       handleBagArrival(passenger);
     } else {
       startSeatInterference(passenger);
@@ -214,7 +218,10 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
     const bagIndex = passenger.bagsStowedBoard;
     const chosen = placeBag(cabin, bins, passenger.row, passenger.blockIndex);
     if (chosen === null) {
-      passenger.bagCount -= 1;
+      // Gate-checked: the bin block is full. bagCount stays the sampled total (the UI reads it
+      // as "bags carried"); bagsRemaining decreases so the loop knows to move on. Splice the
+      // gate-checked bag out of the timing arrays so bagsStowedBoard keeps indexing correctly.
+      passenger.bagsRemaining -= 1;
       passenger.retrievalSeconds.splice(bagIndex, 1);
       passenger.stowSeconds.splice(bagIndex, 1);
       onArrival(passenger);
@@ -230,7 +237,8 @@ export function createBoardSim({ cabin, passengers, strategyId, params = {}, rng
 
   function finishStow(passenger) {
     passenger.bagsStowedBoard += 1;
-    if (passenger.bagsStowedBoard < passenger.bagCount) {
+    passenger.bagsRemaining -= 1;
+    if (passenger.bagsRemaining > 0) {
       handleBagArrival(passenger);
     } else {
       startSeatInterference(passenger);

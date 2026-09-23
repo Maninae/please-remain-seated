@@ -32,7 +32,46 @@ export function samplePassengers(cabin, paramOverrides = {}, rng) {
       id: index, row, col, groupId: groupIdBySeat.get(seatKey(cabin, row, col)) ?? null,
     }));
   }
+  // `priority` and `patient` come from a dedicated fork so the introduced draws do not shift the
+  // pre-existing per-passenger rng stream (which would give the same seed a different population
+  // and a different bag layout). This keeps every other trait bit-identical to what a run with
+  // the same seed produced before these fields existed.
+  const traitsRng = rng.fork('traits');
+  for (const passenger of passengers) {
+    passenger.priority = traitsRng.next();
+    passenger.patient = traitsRng.next() < params.patientFraction;
+  }
+  alignGroupTraits(passengers);
   return passengers;
+}
+
+/**
+ * Groups (a family or party sitting together on one block of a row) move as one unit. Two of the
+ * per-passenger traits break the group finish-window invariant if left to vary member-by-member,
+ * so we align them across the group:
+ *   - `patient`: group members are never patient. Once one impatient member steps into the row's
+ *     aisle pair, a patient group-mate would see the pair as no longer empty and stay SEATED,
+ *     splitting the group across many seconds. Groups stay in the impatient bucket and rely on
+ *     computeGroupPermits at the strategy layer for coordination.
+ *   - `prepSeconds`: every member inherits the earliest (minimum) prep in the group, so when the
+ *     fastest member reaches READY the rest are ready too and can stand together as row-mates
+ *     clear. Without this the widened prep tail (median 3 s, sigma 1.0) puts group members up to
+ *     ~150 s apart on lucky-vs-unlucky draws.
+ */
+function alignGroupTraits(passengers) {
+  const minPrepByGroup = new Map();
+  for (const passenger of passengers) {
+    if (passenger.groupId === null) continue;
+    const current = minPrepByGroup.get(passenger.groupId);
+    if (current === undefined || passenger.prepSeconds < current) {
+      minPrepByGroup.set(passenger.groupId, passenger.prepSeconds);
+    }
+  }
+  for (const passenger of passengers) {
+    if (passenger.groupId === null) continue;
+    passenger.patient = false;
+    passenger.prepSeconds = minPrepByGroup.get(passenger.groupId);
+  }
 }
 
 function seatKey(cabin, row, col) {
@@ -144,10 +183,16 @@ function samplePassenger(cabin, params, rng, seatInfo) {
     compliant: rng.next() < params.compliance,
     groupId: seatInfo.groupId,
     doorGapSeconds: sampleExponential(rng, params.doorInterArrivalMeanSeconds),
+    // priority and patient are filled in by samplePassengers from a separate `traits` fork so
+    // the introduction of these fields does not shift the pre-existing rng stream. See the
+    // fork(`traits`) block in samplePassengers.
+    priority: 0,
+    patient: false,
     phase: null,
     vis: Vis.SEATED,
     aisleCell: null,
     timer: 0,
+    bagsRemaining: 0,  // set at sim start to the physical bag count aboard (bagBins.length).
     timeSplit: createEmptyTimeSplit(),
   };
 }
