@@ -148,8 +148,8 @@ export function mountRankingsTab({ store }) {
       updateLedeForCell(panel, state.currentCellData);
       renderTop(panel, request, state.currentCellRef || effectiveRef);
       renderHeroFinding(panel, state.currentCellData, request.mode);
-      renderChart(panel, state.currentCellData, request, state.currentCellRef || effectiveRef);
-      renderChartCaveat(panel, state.currentCellData, request.mode);
+      const chartInfo = renderChart(panel, state.currentCellData, request, state.currentCellRef || effectiveRef);
+      renderChartCaveat(panel, state.currentCellData, request.mode, chartInfo ? chartInfo.drawnAnchors : null);
       renderStats(panel, state.currentCellData, request.mode);
       await renderSensitivity(panel, state.currentCellData, request);
       return;
@@ -163,8 +163,8 @@ export function mountRankingsTab({ store }) {
     updateLedeForCell(panel, loaded.cellData);
     renderTop(panel, request, effectiveRef);
     renderHeroFinding(panel, loaded.cellData, request.mode);
-    renderChart(panel, loaded.cellData, request, effectiveRef);
-    renderChartCaveat(panel, loaded.cellData, request.mode);
+    const chartInfo = renderChart(panel, loaded.cellData, request, effectiveRef);
+    renderChartCaveat(panel, loaded.cellData, request.mode, chartInfo ? chartInfo.drawnAnchors : null);
     renderStats(panel, loaded.cellData, request.mode);
     await renderSensitivity(panel, loaded.cellData, request);
   }
@@ -351,14 +351,21 @@ function wireControls(panel, store, onChange) {
         other.classList.toggle('on', isMatch);
       }
       panel.dataset.rankingsMode = value;
-      onChange();
+      // N7-M2: push the mode into the shared store so the URL writer rewrites `?mode=`
+      // and the copied link reproduces the chart on screen. The store subscription runs
+      // rerender, so no explicit onChange() call is needed on this branch.
+      if (store.state().mode !== value) store.update({ mode: value });
+      else onChange();
     });
   }
   const presetSelect = panel.querySelector('#rankings-preset-select');
   if (presetSelect) {
     presetSelect.addEventListener('change', () => {
       panel.dataset.rankingsPreset = presetSelect.value;
-      onChange();
+      // N7-M2: mirror the mode toggle. `?preset=` now reflects the aircraft actually being
+      // charted, so a Boeing 777 deplaning link opens on the Boeing 777 deplaning chart.
+      if (store.state().presetId !== presetSelect.value) store.update({ presetId: presetSelect.value });
+      else onChange();
     });
   }
 }
@@ -371,9 +378,17 @@ function populatePresetSelect(indexObject, mode) {
   // mode cannot answer. The old union across modes made a mode switch land on an empty
   // cell state; filtering here means the preset select is always the menu of choices that
   // will render.
-  const presetsForMode = mode
-    ? new Set(indexObject.cells.filter((c) => c.mode === mode).map((c) => c.preset))
-    : new Set(indexObject.cells.map((c) => c.preset));
+  //
+  // N7-M2 companion: on a partial precompute, `pending` names cells the primary index has
+  // not written yet. Every one of those is answerable through the preview index's copy of
+  // the same cell (fallback path). Include pending cells in the menu so a mode toggle to a
+  // partially-written mode still lists the presets the fallback can answer.
+  const pending = Array.isArray(indexObject.pending) ? indexObject.pending : [];
+  const modeSourced = [
+    ...(indexObject.cells || []).filter((c) => (mode ? c.mode === mode : true)),
+    ...pending.filter((c) => (mode ? c.mode === mode : true)),
+  ];
+  const presetsForMode = new Set(modeSourced.map((c) => c.preset));
   const singleClass = document.createElement('optgroup');
   singleClass.label = 'Single class';
   const multi = document.createElement('optgroup');
@@ -595,7 +610,7 @@ function renderStats(panel, cellData, mode) {
 function renderChart(panel, cellData, request, cellRef) {
   const host = panel.querySelector('[data-rankings-chart]');
   const hoverHost = panel.querySelector('[data-rankings-hover]');
-  if (!host) return;
+  if (!host) return null;
   host.innerHTML = '';
   const svgHost = document.createElement('div');
   svgHost.className = 'rankings-chart-svg-host';
@@ -608,8 +623,10 @@ function renderChart(panel, cellData, request, cellRef) {
     passengerCount: cellData.passengerCount || 0,
   });
   // The finding sentence is now the hero above the chart; the chart draws WITHOUT its own
-  // title so the reader's eye lands on the HTML sentence once, not twice (N5-M2).
-  const { hitTargets } = renderRankingsChart(svgEl, {
+  // title so the reader's eye lands on the HTML sentence once, not twice (N5-M2). The
+  // chart returns the anchor labels it actually drew (some phone widths drop labels that
+  // would overlap) so the under-chart caveat can only cite the anchors on screen (N7-M3).
+  const { hitTargets, drawnAnchors = [] } = renderRankingsChart(svgEl, {
     strategies: cellData.strategies,
     anchors,
     mode: request.mode,
@@ -622,6 +639,7 @@ function renderChart(panel, cellData, request, cellRef) {
     wireHoverPanel(svgEl, hoverHost, cellData, hitTargets);
   }
   void cellRef;
+  return { drawnAnchors };
 }
 
 /**
@@ -647,11 +665,11 @@ function renderHeroFinding(panel, cellData, mode) {
  * refutes the chart directly above it. The anchor clause is only added on presets that
  * actually draw anchors.
  */
-function renderChartCaveat(panel, cellData, mode) {
+function renderChartCaveat(panel, cellData, mode, drawnAnchors = null) {
   const host = panel.querySelector('[data-rankings-chart-caveat]');
   if (!host) return;
   if (mode !== 'board') { host.textContent = ''; host.hidden = true; return; }
-  const sentence = composeChartCaveat(cellData);
+  const sentence = composeChartCaveat(cellData, drawnAnchors);
   if (!sentence) { host.textContent = ''; host.hidden = true; return; }
   host.textContent = sentence;
   host.hidden = false;
@@ -669,7 +687,7 @@ function renderChartCaveat(panel, cellData, mode) {
  * The anchor clause is added only when a Spirit-A320 or MythBusters anchor actually sits on
  * the chart for this preset (see anchorsFor()).
  */
-function composeChartCaveat(cellData) {
+function composeChartCaveat(cellData, drawnAnchors = null) {
   if (!cellData || !Array.isArray(cellData.strategies) || cellData.strategies.length === 0) return '';
   const preset = cellData.cell?.preset || '';
   const pax = Number.isFinite(cellData.passengerCount) ? cellData.passengerCount : null;
@@ -677,17 +695,40 @@ function composeChartCaveat(cellData) {
   const b2f = cellData.strategies.find((s) => s.id === 'back-to-front');
   const parts = [];
   parts.push(`This ranking is a ${pax}-passenger cabin at these settings.`);
+  // N7-M3: the caller passes in the anchors the chart actually drew (label included) so a
+  // phone caveat never cites an anchor a phone width has dropped. Fall back to
+  // anchorsFor() only when the caller supplies nothing (tests that hit compose directly).
+  const anchorsHere = (Array.isArray(drawnAnchors) && drawnAnchors.length > 0)
+    ? drawnAnchors
+    : anchorsFor({ mode: 'board', preset, passengerCount: pax });
+  const mythbustersAnchor = anchorsHere.find((a) => a.id === 'mythbusters-b2f');
   if (b2f && Number.isFinite(b2f.medianSeconds) && b2f.medianSeconds > 0) {
     const b2fRate = pax / (b2f.medianSeconds / 60);
-    parts.push(`Front-to-back runs slower here than the MythBusters back-to-front field test: about ${b2fRate.toFixed(1)} pax/min in the sim, against ~7 pax/min measured on TV.`);
+    const mythbustersRate = 7;
+    // N7-M1: the verdict word is computed from the two rates instead of a literal, so the
+    // sentence stops printing "slower" beside a rate higher than the field figure it is
+    // compared against. When the two rates are within half a passenger per minute of each
+    // other, drop the clause entirely: neither "faster" nor "slower" is defensible there.
+    // N7-M3 companion: name the MythBusters tick only when it is drawn on this viewport;
+    // on phone, phrase the comparison against the field figure alone so we cite a source
+    // the reader has no way to check against a missing chart mark.
+    const rateGap = Math.abs(b2fRate - mythbustersRate);
+    if (rateGap >= 0.5) {
+      const verdict = b2fRate > mythbustersRate ? 'faster' : 'slower';
+      if (mythbustersAnchor) {
+        parts.push(`Front-to-back runs ${verdict} here than the MythBusters back-to-front field test: about ${b2fRate.toFixed(1)} pax/min in the sim, against ~${mythbustersRate} pax/min measured on TV.`);
+      } else {
+        parts.push(`Front-to-back runs ${verdict} here than the ~${mythbustersRate} pax/min back-to-front field figure: about ${b2fRate.toFixed(1)} pax/min in the sim.`);
+      }
+    }
   }
   const airlineRows = cellData.strategies.filter((s) => s.family === 'airline');
   if (airlineRows.length > 0) {
     const sortedAirline = [...airlineRows].sort((a, b) => a.medianSeconds - b.medianSeconds);
     const fastestAirline = sortedAirline[0];
     const fastestAirlineMin = (fastestAirline.medianSeconds / 60).toFixed(1);
-    const anchorsHere = anchorsFor({ mode: 'board', preset, passengerCount: pax });
     const spiritAnchor = anchorsHere.find((a) => a.id === 'spirit-a320');
+    const klmAnchor = anchorsHere.find((a) => a.id === 'klm-737');
     if (spiritAnchor) {
       const spiritMin = spiritAnchor.minutes;
       const allAboveSpirit = sortedAirline.every((s) => s.medianSeconds >= spiritMin * 60);
@@ -696,6 +737,10 @@ function composeChartCaveat(cellData) {
       } else {
         parts.push(`The fastest simulated airline procedure, ${fastestAirline.label}, lands at ${fastestAirlineMin} min, below the Spirit ${spiritMin}-minute anchor.`);
       }
+    } else if (klmAnchor) {
+      // KLM is a range anchor; describe its band rather than pretending it is a single tick.
+      const rangeText = `${klmAnchor.minutes} to ${klmAnchor.minutesEnd} min`;
+      parts.push(`The fastest simulated airline procedure, ${fastestAirline.label}, lands at ${fastestAirlineMin} min, against KLM's ${rangeText} field range on the same aircraft class.`);
     } else {
       parts.push(`The fastest simulated airline procedure, ${fastestAirline.label}, lands at ${fastestAirlineMin} min. No airline field anchor sits on the chart for this cabin.`);
     }

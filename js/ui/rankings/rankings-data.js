@@ -273,13 +273,19 @@ export async function loadCellWithFallback({ indexObject, mode, preset, knobs, p
     attempts.push({ meta: primary, label: 'primary' });
   }
 
-  // Preview equivalent of the primary: same (mode, preset, primary.knobs) in the preview
-  // index, written at PREVIEW_SEEDS so its filename is a distinct file. This covers the
-  // common case where a partial full-precompute run has not yet reached a cell that the
-  // preview build already wrote.
+  // Preview equivalent for the requested cell: same (mode, preset, knobs). When primary
+  // exists we prefer its snapped knobs (the exact same cell shape written at PREVIEW_SEEDS);
+  // when primary is null (a partial index has no matching cell yet), fall back to the
+  // caller's requested knobs so the preview build's headline for (mode, preset) can still
+  // reach the reader. This covers the common case where a partial full-precompute run has
+  // not yet reached a cell that the preview build already wrote (N7-B1: previously read
+  // primary.knobs unconditionally and crashed on the partial-index path).
   const previewIndex = await loadPreviewIndex();
   if (previewIndex) {
-    const previewSamePrimary = findExactCell(previewIndex, mode, preset, primary.knobs);
+    const targetKnobs = (primary && primary.knobs) ? primary.knobs : knobs;
+    const previewSamePrimary = targetKnobs
+      ? findExactCell(previewIndex, mode, preset, targetKnobs)
+      : null;
     if (previewSamePrimary && !seen.has(previewSamePrimary.file)) {
       attempts.push({ meta: previewSamePrimary, label: 'preview' });
       seen.add(previewSamePrimary.file);
@@ -298,7 +304,6 @@ export async function loadCellWithFallback({ indexObject, mode, preset, knobs, p
     attempts.push({ meta: headline, label: 'headline' });
     seen.add(headline.file);
   }
-  void knobs;
 
   for (let i = 0; i < attempts.length; i += 1) {
     const { meta, label } = attempts[i];

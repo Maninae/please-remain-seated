@@ -118,8 +118,16 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
     }
     const canvas = laneNodes[laneIndex].canvas;
     const laneLetter = laneIndex === 0 ? 'Left' : 'Right';
+    // N7-m5: the aria label used the deplane vocabulary ("from door open", "aboard")
+    // in both modes; nobody is aboard at t=0 during boarding. Read the mode and phrase
+    // the total honestly so a screen reader hears the same story the visible caption
+    // tells.
+    const mode = store.state().mode;
+    const timeSourceLabel = mode === 'board'
+      ? 'total time from seatbelt sign off to seated'
+      : 'total time aboard from door open';
     canvas.setAttribute('aria-label',
-      `${laneLetter} cabin: finished at ${formatClock(laneFinishSeconds[laneIndex])}. Seats coloured by total time aboard from door open.`);
+      `${laneLetter} cabin: finished at ${formatClock(laneFinishSeconds[laneIndex])}. Seats coloured by ${timeSourceLabel}.`);
   }
 
   function emitProvisionalFinish(finishedLane, otherLane) {
@@ -275,9 +283,14 @@ export function createFinishController({ laneNodes, laneViews, laneSims, store, 
     // and a plain zero on the "short" end. Both lanes then read against the same numeric
     // scale, and the caption below says so explicitly.
     const scaleMax = Number.isFinite(sharedMax) && sharedMax > 0 ? formatClock(sharedMax) : 'long';
+    // N7-m5: mode-aware phrasing so the caption tracks the aria label above it.
+    const mode = store.state().mode;
+    const timeSourcePhrase = mode === 'board'
+      ? 'more time from seatbelt sign off to seated'
+      : 'more time aboard from door open';
     legend.innerHTML = `
       <span class="heat-ramp"><span class="end">0:00</span><span class="bar"></span><span class="end">${escapeHtml(scaleMax)}</span></span>
-      <span class="heat-caption-text">Darker = more time aboard from door open. Both cabins share this scale. Worst ${escapeHtml(worstLabel)}; best ${escapeHtml(bestLabel)}.</span>
+      <span class="heat-caption-text">Darker = ${timeSourcePhrase}. Both cabins share this scale. Worst ${escapeHtml(worstLabel)}; best ${escapeHtml(bestLabel)}.</span>
     `;
   }
 

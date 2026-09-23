@@ -84,6 +84,11 @@ export function mountRace({ store, onFinish }) {
   syncCanvasSizes();
   replaceSims(buildRaceSims(store.state(), currentStrategyIdForLane));
   drawOnce();
+  // N7-m6: sync the Last/Average toggle's ARIA state at mount so the buttons carry
+  // aria-checked from t=0 (the initial HTML has them, but a screen reader that lands on
+  // the page before any user event fires should still see the correct state written by
+  // our render pipeline, not just the static markup).
+  updateSplitTargetUI();
 
   store.subscribe(handleStoreChange);
 

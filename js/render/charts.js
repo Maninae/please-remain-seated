@@ -12,5 +12,5 @@
  * re-exports the surface.
  */
 
-export { renderStrips, quantile, jitterFor, niceCeiling } from './charts-strips.js';
+export { renderStrips, quantile, jitterFor, niceCeiling, computeSharedStripsAxis } from './charts-strips.js';
 export { renderTimeSplit } from './charts-time-split.js';

@@ -46,9 +46,15 @@ export function renderStrips(host, series, options = {}) {
   // values; the arithmetic is cheap.
   const previewValues = [];
   for (const s of series) for (const v of s.values || []) if (Number.isFinite(v)) previewValues.push(v);
+  // N7-B2: when the caller passes a shared axis (options.axisMinSeconds / axisMaxSeconds),
+  // both stacked strip panels project seconds onto the same pixel scale. Without the shared
+  // axis, board compare stacked textbook (0m-to-60m) above airlines (12m-to-45m), rendering
+  // the same minutes at a 1.82x scale ratio.
+  const sharedMax = Number.isFinite(options.axisMaxSeconds) ? options.axisMaxSeconds : null;
+  const sharedMin = Number.isFinite(options.axisMinSeconds) ? options.axisMinSeconds : null;
   const previewMax = previewValues.length ? Math.max(...previewValues) : 60;
-  const previewCap = niceCeiling(previewMax);
-  const previewFloor = computeStripsFloor(previewValues, previewCap);
+  const previewCap = sharedMax != null ? sharedMax : niceCeiling(previewMax);
+  const previewFloor = sharedMin != null ? sharedMin : computeStripsFloor(previewValues, previewCap);
   const floorNoteHeight = previewFloor > 0 ? 14 : 0;
   const paddingTop = STRIPS_PADDING_TOP + floorNoteHeight;
   const height = paddingTop + rows * STRIPS_ROW_HEIGHT + STRIPS_PADDING_BOTTOM;
@@ -58,12 +64,7 @@ export function renderStrips(host, series, options = {}) {
     'font-family': THEME.fontFamily,
   });
 
-  const allValues = previewValues;
   const paddedMax = previewCap;
-  // N6-m1: axis floor for the strip chart, mirrored on the rankings chart. When every dot
-  // sits well above zero, start the axis near the fastest dot instead of drawing 0m to 60m
-  // for a data range of 10m to 16m. The dashed break tick and the "axis starts at Xm" note
-  // above the axis line signal the truncation.
   const paddedMin = previewFloor;
 
   const chartX0 = STRIPS_PADDING_LEFT;
@@ -71,6 +72,9 @@ export function renderStrips(host, series, options = {}) {
   const chartWidth = Math.max(1, chartX1 - chartX0);
   const scaleRange = Math.max(1, paddedMax - paddedMin);
   const projectSeconds = (seconds) => chartX0 + Math.min(1, Math.max(0, (seconds - paddedMin) / scaleRange)) * chartWidth;
+  // N7-m2: track off-scale rows (dots past paddedMax) so we can mark them explicitly at the
+  // right edge instead of silently clamping. Same standard as the ranked chart's break mark.
+  let offScaleCount = 0;
 
   if (options.title) {
     // Round-05: pin the title to the LEFT edge so the finding sentence uses the full chart
@@ -123,7 +127,9 @@ export function renderStrips(host, series, options = {}) {
 
     const jitterH = STRIPS_ROW_HEIGHT * STRIPS_JITTER_HEIGHT_FRACTION;
     for (let d = 0; d < values.length; d += 1) {
-      const x = projectSeconds(values[d]);
+      const rawValue = values[d];
+      if (rawValue > paddedMax) offScaleCount += 1;
+      const x = projectSeconds(rawValue);
       const y = rowY + jitterFor(s.id || s.label || '', d) * jitterH;
       appendCircle(svg, {
         cx: x, cy: y, r: STRIPS_DOT_RADIUS,
@@ -140,6 +146,25 @@ export function renderStrips(host, series, options = {}) {
       'stroke-width': STRIPS_MEDIAN_STROKE,
       'stroke-linecap': 'round',
     });
+  }
+  // N7-m2: strip chart cap treatment. Any dot past paddedMax was silently clamped to the
+  // right edge; the ranked chart three clicks away carries a break mark and an "(off scale)"
+  // label, so this one should too. A single italic note pinned to the axis line, plus a
+  // dashed vertical break tick at the right edge, so the reader sees the truncation.
+  if (offScaleCount > 0) {
+    const axisY = paddingTop - 6;
+    appendLine(svg, {
+      x1: chartX1, x2: chartX1, y1: axisY - 5, y2: axisY + 5,
+      stroke: THEME.rule, 'stroke-width': 0.8, 'stroke-dasharray': '2 2',
+    });
+    appendText(svg, {
+      x: chartX1, y: axisY - 16,
+      'font-size': STRIPS_AXIS_FONT_PX,
+      'text-anchor': 'end',
+      fill: THEME.ink,
+      'fill-opacity': 0.5,
+      'font-style': 'italic',
+    }, `${offScaleCount} off scale`);
   }
   return svg;
 }
@@ -188,6 +213,27 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
 }
 
 /**
+ * Compute a shared axis (floor and cap in seconds) across an arbitrary list of strip-chart
+ * series. Used by the "Run it N times" comparison so its two stacked panels (textbook and
+ * airline in board mode) project the same minutes onto the same pixel scale. Fixed value
+ * pairs bypass renderStrips' per-panel auto-scaling entirely.
+ */
+export function computeSharedStripsAxis(seriesList) {
+  const allValues = [];
+  if (Array.isArray(seriesList)) {
+    for (const s of seriesList) {
+      if (!s || !Array.isArray(s.values)) continue;
+      for (const v of s.values) if (Number.isFinite(v)) allValues.push(v);
+    }
+  }
+  if (allValues.length === 0) return { axisMinSeconds: 0, axisMaxSeconds: 60 };
+  const rawMax = Math.max(...allValues);
+  const axisMaxSeconds = niceCeiling(rawMax);
+  const axisMinSeconds = computeStripsFloor(allValues, axisMaxSeconds);
+  return { axisMinSeconds, axisMaxSeconds };
+}
+
+/**
  * Axis floor for the strip chart. Same policy as the rankings chart: earn a floor when the
  * data really sit above zero (at least 2 minutes AND at least 25% of the cap); leave a
  * small breather below the fastest dot; floor to a nice minute step.
@@ -195,8 +241,11 @@ function drawStripsAxis(svg, x0, x1, axisY, paddedMin, paddedMax) {
 function computeStripsFloor(allValues, paddedMax) {
   if (!Array.isArray(allValues) || allValues.length === 0) return 0;
   const minVal = Math.min(...allValues);
-  if (minVal < 2 * 60) return 0;
-  if (minVal < paddedMax * 0.25) return 0;
+  // N7-m3: relaxed floor gates (matching rankings-chart) so the strip chart earns a floor
+  // whenever the fastest dot sits meaningfully above zero, not just when it exceeds the
+  // old 25% cap threshold.
+  if (minVal < 1.5 * 60) return 0;
+  if (minVal < paddedMax * 0.15) return 0;
   const breather = Math.max(30, (paddedMax - minVal) * 0.05);
   const raw = Math.max(0, minVal - breather);
   const minutes = raw / 60;

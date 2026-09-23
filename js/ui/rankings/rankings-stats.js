@@ -240,8 +240,8 @@ function tile({ label, subLabel, value, unit, subUnit, infoKey, dataAttrs }) {
  * If value > 0 the first-named side is `betterWord` (usually "better"); if value < 0 it is
  * `worseWord`. The printed number is the absolute value with the sign carried in the label
  * word so a reader can see the direction at a glance without decoding a minus sign. A value
- * inside +/- 0.05 person-years / day prints as "0.1 person-years / day" without a direction
- * word because it is inside rounding noise.
+ * inside +/- 0.05 person-years / day prints as "0.0 person-years / day" (fmtPersonYears
+ * rounds to one decimal) without a direction word because it is inside rounding noise.
  */
 function buildSignedComparisonRow({ head, detail, value, betterWord, worseWord, emphasize }) {
   const abs = Math.abs(value);

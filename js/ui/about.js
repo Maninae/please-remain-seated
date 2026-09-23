@@ -94,7 +94,10 @@ const ASSUMPTION_ROWS = Object.freeze([
     label: 'Random / WILMA / open-seating boarding times',
     value: 'anchors for boarding times',
     source: 'MythBusters episode 222, 2014 (n=1, TV volunteers)',
-    kind: 'measured',
+    // N7-n7: not the same evidence class as the peer-reviewed measurements above; keep it
+    // in the table for provenance but style the row as a demonstration so it does not read
+    // as visually identical to Schultz's field data.
+    kind: 'demonstration',
   },
   {
     label: 'Status mix (elite tiers on a US mainline)',

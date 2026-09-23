@@ -119,6 +119,18 @@
 .about-assumptions-table tr[data-kind="measured"] td:last-child {
   color: var(--ink);
 }
+/*
+ * N7-n7: a demonstration (a controlled test with n=1, e.g. MythBusters) is not the same
+ * evidence class as a peer-reviewed measurement; nudge the treatment so a reader scanning
+ * the source column sees the distinction at a glance without hunting the sample size in
+ * the source text.
+ */
+.about-assumptions-table tr[data-kind="demonstration"] td:last-child {
+  color: var(--ink-soft);
+  font-style: italic;
+  text-decoration: underline dotted color-mix(in oklab, var(--rule) 65%, transparent);
+  text-underline-offset: 3px;
+}
 @media (max-width: 600px) {
   .about-table { display: block; overflow-x: auto; }
 }

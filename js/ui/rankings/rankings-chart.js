@@ -146,9 +146,12 @@ export function renderRankingsChart(host, {
   const axisY = paddingTop - axisBelowGap;
   drawAxis(svg, chartX0, chartX1, axisY, paddedMin, paddedMax);
   const plotBottom = paddingTop + totalRows * ROW_HEIGHT + groupGaps + 4;
+  // N7-M3: drawAnchors pushes each labelled anchor into this array so the under-chart
+  // caveat can cite only anchors the reader can actually see at this viewport width.
+  const drawnAnchors = [];
   drawAnchors(svg, {
     anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick,
-    rowOffsets: anchorRowOffsets,
+    rowOffsets: anchorRowOffsets, drawnAnchors,
   });
 
   const hitTargets = [];
@@ -239,7 +242,7 @@ export function renderRankingsChart(host, {
     }, captionLines[li]);
   }
 
-  return { svg, hitTargets, width, height };
+  return { svg, hitTargets, width, height, drawnAnchors };
   void cell;
 }
 
@@ -294,12 +297,13 @@ function computeAxisFloor(rows, anchors, paddedMax) {
     return s > 0 && s < min ? s : min;
   }, Number.POSITIVE_INFINITY);
   const candidate = Math.min(minP10, Number.isFinite(anchorMin) ? anchorMin : minP10);
-  // Only apply a floor when the data really do sit far from zero: at least 2 minutes above
-  // 0 AND at least 25% of the axis cap. N6-m2 caught the old 4-minute cutoff eating a third
-  // of the A320 deplane frame; 2 minutes still keeps the CRJ deplane (3-min floor) starting
-  // near zero while the A320 deplane (3.5-min p10) earns a floor.
-  if (candidate < 2 * 60) return 0;
-  if (candidate < paddedMax * 0.25) return 0;
+  // Only apply a floor when the data really do sit far from zero. N7-m3 relaxed the second
+  // gate from 25% to 15% of the axis cap so CRJ-700, E175 and 737 MAX 8 LCC deplane earn
+  // a floor: their first dot lands 20-32% of the frame from the left, well past the "empty
+  // is worth noting" threshold. The absolute floor gate stays at 1.5 minutes: below that
+  // the axis is short enough that starting at zero costs little visual room.
+  if (candidate < 1.5 * 60) return 0;
+  if (candidate < paddedMax * 0.15) return 0;
   // Leave a small breather below the data so the leftmost dot doesn't kiss the axis label.
   const breather = Math.max(30, (paddedMax - candidate) * 0.05);
   const raw = Math.max(0, candidate - breather);
@@ -521,7 +525,7 @@ function anchorRowOffsetsForWidth(width) {
   return [22, 34, 46];
 }
 
-function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick, rowOffsets }) {
+function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axisY, plotBottom, onAnchorClick, rowOffsets, drawnAnchors }) {
   if (!anchors || anchors.length === 0) return;
   const LABEL_MIN_GAP = 82;
   const ROW_OFFSETS = Array.isArray(rowOffsets) && rowOffsets.length > 0 ? rowOffsets : [22, 34, 46];
@@ -628,6 +632,10 @@ function drawAnchors(svg, { anchors, chartX0, chartX1, paddedMin, paddedMax, axi
         onAnchorClick(anchor, event.currentTarget);
       });
     }
+    // N7-M3: record this anchor as "drawn with a label" so the caveat under the chart can
+    // cite only anchors the reader can actually see. The phone-collision branch above uses
+    // `continue` before reaching this point, so tick-only anchors do not appear here.
+    if (Array.isArray(drawnAnchors)) drawnAnchors.push(anchor);
   }
 }
 
@@ -750,8 +758,11 @@ function niceCeiling(seconds) {
   return Math.ceil(minutes / 60) * 3600;
 }
 
-function niceMinuteStep(minuteMax) {
-  const raw = minuteMax / 5;
+function niceMinuteStep(minuteRange) {
+  // N7-m4: aim for ~7 ticks instead of 5, so a floored board axis (12m to 45m, range 33)
+  // draws seven `5m` ticks instead of three `10m` ticks. Fewer ticks meant a slowest row
+  // at 44 min landed 15% past the last labelled tick with no scale beside it.
+  const raw = minuteRange / 7;
   const candidates = [0.5, 1, 2, 5, 10, 15, 20, 30];
   for (let i = 0; i < candidates.length; i += 1) {
     if (candidates[i] >= raw) return candidates[i];

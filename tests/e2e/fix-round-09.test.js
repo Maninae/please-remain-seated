@@ -273,55 +273,137 @@ test('N6-B2: negative comparison values print with "worse" on losing presets', a
   } finally { await browser.close(); }
 });
 
-test('N6-B1: partial-index board a320 clears every part of the tab on mode toggle', async (t) => {
+test('N7-B1: partial primary + real preview: mode toggle loads preview fallback with no crash', async (t) => {
   const browser = await safeLaunch();
   if (!browser) { t.diagnostic('playwright chromium not available; skipping'); return; }
   try {
-    // Index carries a deplane cell for a320 but NO board cell. Toggling to Boarding must
-    // clear every part of the tab and lit the Boarding button's aria-checked to true.
+    // Production shape: primary index.json misses the board a320 headline (still writing
+    // it, listed under `pending`) while index-preview.json ships the board a320 cell it
+    // always ships. Toggling from Deplaning to Boarding must fall through to the preview
+    // cell without throwing, land the Boarding button lit, keep the aircraft select on
+    // A320, and render board content (not a stale deplane finding).
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    await serveFixtureCells(context, {
-      presetSpec: {},
-      includeDeplaneA320: true,
-      includeBoardA320: false,
-    });
-    const page = await loadPage(context, `${BASE_URL}/index.html?tab=rankings&mode=deplane&preset=a320&seed=b1-partial`);
-    // Sanity: deplane hero should be present.
+    await servePartialIndexWithRealPreview(context);
+    const pageErrors = [];
+    const page = await context.newPage();
+    page.on('pageerror', (error) => pageErrors.push(String(error && error.message ? error.message : error)));
+    await page.goto('about:blank');
+    await page.goto(`${BASE_URL}/index.html?tab=rankings&mode=deplane&preset=a320&seed=b1-partial`, { waitUntil: 'load' });
+    await page.evaluate(() => { try { window.localStorage.clear(); } catch {} });
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector('[data-rankings-lede]');
+    await page.waitForTimeout(2200);
+    // Sanity: deplane hero present before the toggle.
     const preToggle = await page.evaluate(() => document.querySelector('[data-rankings-finding]')?.textContent || '');
     assert.ok(preToggle.length > 10, `deplane hero should be present before toggle, got "${preToggle}"`);
 
     await page.click('button[data-rankings-mode="board"]');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1800);
     const post = await page.evaluate(() => ({
       findingText: document.querySelector('[data-rankings-finding]')?.textContent || '',
-      findingHidden: document.querySelector('[data-rankings-finding]')?.hidden ?? false,
       statsText: document.querySelector('[data-rankings-stats]')?.textContent || '',
       footnoteText: document.querySelector('[data-rankings-footnote]')?.textContent || '',
       caveatText: document.querySelector('[data-rankings-chart-caveat]')?.textContent || '',
       chartHTML: document.querySelector('[data-rankings-chart]')?.innerHTML || '',
-      statusText: document.querySelector('[data-rankings-status]')?.textContent || '',
-      // Use `button` to disambiguate from the panel, which also carries
-      // data-rankings-mode after the click.
       boardAriaChecked: document.querySelector('button[data-rankings-mode="board"]')?.getAttribute('aria-checked') || '',
       deplaneAriaChecked: document.querySelector('button[data-rankings-mode="deplane"]')?.getAttribute('aria-checked') || '',
+      presetSelectValue: document.getElementById('rankings-preset-select')?.value || '',
     }));
+    assert.equal(pageErrors.length, 0, `should be zero page errors, got: ${pageErrors.join(' | ')}`);
     assert.equal(post.boardAriaChecked, 'true', `Boarding aria-checked should be true, got "${post.boardAriaChecked}"`);
     assert.equal(post.deplaneAriaChecked, 'false', `Deplaning aria-checked should be false, got "${post.deplaneAriaChecked}"`);
-    // The status line reports the no-cell state.
-    assert.match(post.statusText, /No precomputed cell/i, `status line should announce missing cell, got "${post.statusText}"`);
-    // Everything from the deplane render is gone.
-    for (const [k, v] of Object.entries({
-      findingText: post.findingText, statsText: post.statsText, footnoteText: post.footnoteText, caveatText: post.caveatText,
-    })) {
-      assert.doesNotMatch(v, /deplan/i, `${k} should be free of deplaning text after toggle, got "${v}"`);
-      assert.doesNotMatch(v, /Both doors/i, `${k} should not name a deplane strategy, got "${v}"`);
-      assert.doesNotMatch(v, /Free-for-all/i, `${k} should not name a deplane strategy, got "${v}"`);
-    }
-    // The chart should be empty.
-    assert.ok(post.chartHTML.length < 40, `chart should be empty on no-cell, got ${post.chartHTML.length} chars`);
-    await shot(page, 'rankings-board-a320-partial-index.png');
+    assert.equal(post.presetSelectValue, 'a320', `aircraft select should stay on A320, got "${post.presetSelectValue}"`);
+    // Board content, not the previous deplane finding. Board hero mentions boarding words
+    // ("board", "boards"); no deplane-specific text should leak.
+    assert.match(post.findingText, /board(s|ing|)/i, `board hero should mention boarding, got "${post.findingText}"`);
+    assert.doesNotMatch(post.findingText, /Both doors|Free-for-all|One row at a time/i,
+      `board hero should not name a deplane strategy, got "${post.findingText}"`);
+    // Chart should be populated with SVG content.
+    assert.ok(post.chartHTML.length > 200, `chart should render board rows, got ${post.chartHTML.length} chars`);
+    await shot(page, 'rankings-board-a320-partial-fallback.png');
   } finally { await browser.close(); }
 });
+
+/**
+ * Serve a partial primary index (missing the board a320 headline, listed in `pending`)
+ * plus a real production-shape preview index that ships the board a320 cell. The route
+ * table covers the cell files: primary deplane a320 (200 seeds fixture) and preview
+ * board a320 (200 seeds). Any other rankings cell fetch replies 404 so a wrong-path
+ * lookup shows up as a request, not silently succeeds.
+ */
+async function servePartialIndexWithRealPreview(context) {
+  const seeds = 200;
+  const primaryDeplaneCell = {
+    id: `deplane__a320__load=0.85__comply=0.85__groups=0.25__bags=default__bins=roomy__n=${seeds}`,
+    mode: 'deplane', preset: 'a320',
+    knobs: { load: 0.85, compliance: 0.85, groups: 0.25, bags: 'default', bins: 'roomy' },
+    seeds, kind: 'headline',
+    file: `deplane__a320__load=0.85__comply=0.85__groups=0.25__bags=default__bins=roomy__n=${seeds}.json`,
+  };
+  const primaryIndex = {
+    generatedAt: new Date().toISOString(),
+    engineVersion: 'fixture09-partial',
+    preview: false,
+    defaults: { load: 0.85, compliance: 0.85, groups: 0.25, bags: 'default', bins: 'roomy' },
+    grid: {
+      load: [0.7, 0.85, 1], compliance: [0.5, 0.85, 1], groups: [0, 0.25, 0.5],
+      bags: ['default', 'light', 'heavy'], bins: ['roomy', 'legacy'],
+    },
+    strategyCountByMode: { deplane: 3, board: 8 },
+    seedTiers: { headline: 10000, small: 2000, sensitivity: 2000, preview: 200 },
+    namedHeadlinePresets: ['a320'],
+    sensitivityPresets: [],
+    sensitivityFactors: [],
+    cells: [primaryDeplaneCell],
+    // A partial precompute discloses the cells it has not written yet through `pending`.
+    pending: [{
+      id: `board__a320__load=0.85__comply=0.85__groups=0.25__bags=default__bins=roomy__n=10000`,
+      mode: 'board', preset: 'a320',
+      knobs: { load: 0.85, compliance: 0.85, groups: 0.25, bags: 'default', bins: 'roomy' },
+      seeds: 10000, kind: 'headline',
+      file: `board__a320__load=0.85__comply=0.85__groups=0.25__bags=default__bins=roomy__n=10000.json`,
+    }],
+  };
+  const previewBoardCell = {
+    id: `board__a320__load=0.85__comply=0.85__groups=0.25__bags=default__bins=roomy__n=${seeds}`,
+    mode: 'board', preset: 'a320',
+    knobs: { load: 0.85, compliance: 0.85, groups: 0.25, bags: 'default', bins: 'roomy' },
+    seeds, kind: 'headline',
+    file: `board__a320__load=0.85__comply=0.85__groups=0.25__bags=default__bins=roomy__n=${seeds}.json`,
+  };
+  const previewDeplaneCell = { ...primaryDeplaneCell };
+  const previewIndex = {
+    generatedAt: new Date().toISOString(),
+    engineVersion: 'fixture09-preview',
+    preview: true,
+    defaults: primaryIndex.defaults,
+    grid: primaryIndex.grid,
+    strategyCountByMode: { deplane: 3, board: 8 },
+    seedTiers: { headline: 200, small: 200, sensitivity: 200, preview: 200 },
+    namedHeadlinePresets: ['a320'],
+    sensitivityPresets: [],
+    sensitivityFactors: [],
+    cells: [previewDeplaneCell, previewBoardCell],
+  };
+  // Playwright's route matching is LIFO: the most recently registered route wins.
+  // Register the catch-all FIRST so specific routes registered below override it.
+  await context.route(/\/data\/rankings\/[^/]+\.json$/, (route) => route.fulfill({ status: 404, body: '' }));
+  const deplaneCellPayload = buildDeplaneCell('a320', { passengerCount: 153, deplaneMedianSec: 240 }, seeds);
+  await context.route(new RegExp(`\\/data\\/rankings\\/${primaryDeplaneCell.file.replace(/\./g, '\\.')}$`),
+    (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(deplaneCellPayload) }));
+  const boardCellPayload = buildBoardCell('a320', {
+    passengerCount: 153,
+    randomSec: 1230, airlineSecs: [1160, 1180, 1200, 1220, 1210, 1170, 1150, 1190], textbookSec: 660,
+  }, seeds);
+  await context.route(new RegExp(`\\/data\\/rankings\\/${previewBoardCell.file.replace(/\./g, '\\.')}$`),
+    (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(boardCellPayload) }));
+  await context.route(/\/data\/rankings\/index\.json$/, (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(primaryIndex),
+  }));
+  await context.route(/\/data\/rankings\/index-preview\.json$/, (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(previewIndex),
+  }));
+}
 
 test('N6-M3: anchor label bboxes stay inside the SVG viewBox at 1280 and 400 px', async (t) => {
   const browser = await safeLaunch();

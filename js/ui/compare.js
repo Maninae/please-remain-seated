@@ -15,6 +15,7 @@ import {
 } from '../engine/strategies/index.js';
 import { seedList } from '../batch.js';
 import { renderStrips } from '../render/charts.js';
+import { computeSharedStripsAxis } from '../render/charts-strips.js';
 import {
   cabinOverridesFromState, passengerOverridesFromState, strategyCabinOverridesFor,
 } from './sim-config.js';
@@ -173,12 +174,28 @@ export function mountCompare({ store, race }) {
       // and the textbook rows; the second carries a small group label ("How airlines actually
       // board") as its title and the airline rows. A light rule between them makes the split
       // read as one dataset in two families, not two unrelated charts.
-      const textbookSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      stripsWrap.appendChild(textbookSvg);
-      renderStrips(textbookSvg, textbookResults.map((row) => ({
+      //
+      // N7-B2: derive one axis (floor and cap) over the UNION of every seed in both panels
+      // and pass it to both renderStrips calls, so the same minute renders at the same
+      // pixel distance on both halves. Previously each panel ran its own floor/cap and the
+      // airline panel drew at 1.82x the horizontal scale of the textbook panel above it.
+      const textbookSeriesData = textbookResults.map((row) => ({
         id: row.strategyId, label: row.label, values: row.totalSeconds,
         highlight: racingIds.includes(row.strategyId),
-      })), { width, title });
+      }));
+      const airlineSeriesData = airlineResults.map((row) => ({
+        id: row.strategyId, label: row.label, values: row.totalSeconds,
+        highlight: racingIds.includes(row.strategyId),
+      }));
+      const sharedAxis = computeSharedStripsAxis([...textbookSeriesData, ...airlineSeriesData]);
+
+      const textbookSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      stripsWrap.appendChild(textbookSvg);
+      renderStrips(textbookSvg, textbookSeriesData, {
+        width, title,
+        axisMinSeconds: sharedAxis.axisMinSeconds,
+        axisMaxSeconds: sharedAxis.axisMaxSeconds,
+      });
 
       const rule = document.createElement('div');
       rule.className = 'compare-group-rule';
@@ -186,10 +203,18 @@ export function mountCompare({ store, race }) {
 
       const airlineSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       stripsWrap.appendChild(airlineSvg);
-      renderStrips(airlineSvg, airlineResults.map((row) => ({
-        id: row.strategyId, label: row.label, values: row.totalSeconds,
-        highlight: racingIds.includes(row.strategyId),
-      })), { width, title: 'How airlines actually board' });
+      renderStrips(airlineSvg, airlineSeriesData, {
+        width, title: 'How airlines actually board',
+        axisMinSeconds: sharedAxis.axisMinSeconds,
+        axisMaxSeconds: sharedAxis.axisMaxSeconds,
+      });
+
+      // A single caption between the two panels saying so, so the reader is not left
+      // inferring shared scale from tick labels alone. Matches the wording the heat ramp uses.
+      const sharedCaption = document.createElement('p');
+      sharedCaption.className = 'compare-shared-scale';
+      sharedCaption.textContent = 'Both panels share this scale.';
+      stripsWrap.appendChild(sharedCaption);
     }
 
     const totalRows = textbookResults.length + airlineResults.length;
